@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Safety Nudges</title>
+    <style>
+      body {
+        margin: 0;
+        min-width: 280px;
+        padding: 16px;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      p {
+        margin: 8px 0 0;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      label,
+      select,
+      button {
+        display: block;
+        width: 100%;
+        margin-top: 12px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      input[type="url"],
+      input[type="password"],
+      input[type="text"],
+      select {
+        box-sizing: border-box;
+        width: 100%;
+        margin-top: 6px;
+        padding: 8px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        font-size: 12px;
+      }
+
+      .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .checkbox-row input {
+        margin: 0;
+      }
+
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 12px;
+        background: #0f172a;
+        color: #f8fafc;
+        cursor: pointer;
+      }
+
+      code {
+        font-size: 12px;
+      }
+
+      .section-title {
+        margin-top: 16px;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #475569;
+      }
+
+      #activity-log {
+        margin-top: 8px;
+        max-height: 180px;
+        overflow: auto;
+        padding: 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        background: #ffffff;
+        font-size: 11px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Safety Nudges</h1>
+    <p id="status">Checking extension status...</p>
+    <p>The current shell only runs on <code>chatgpt.com</code> and <code>chat.openai.com</code>.</p>
+    <label for="provider">Analysis provider</label>
+    <select id="provider">
+      <option value="openai">Direct OpenAI</option>
+      <option value="ollama">Ollama (local model)</option>
+      <option value="local">Local endpoint</option>
+    </select>
+    <label for="openai-key">OpenAI API key</label>
+    <input id="openai-key" type="password" placeholder="sk-...">
+    <p>The key is stored only in this extension's local Chrome storage on your machine.</p>
+    <label for="openai-model">OpenAI model</label>
+    <input id="openai-model" type="text" placeholder="gpt-5-mini">
+    <label for="ollama-endpoint">Ollama chat endpoint</label>
+    <input id="ollama-endpoint" type="url" placeholder="http://127.0.0.1:11434/api/chat">
+    <label for="ollama-model">Ollama model</label>
+    <input id="ollama-model" type="text" placeholder="llama3.1:8b">
+    <p>For local Ollama, make sure the model is already pulled and the Ollama server is running.</p>
+    <label for="endpoint">Custom analysis endpoint</label>
+    <input id="endpoint" type="url" placeholder="http://127.0.0.1:8787/analyze">
+    <label class="checkbox-row" for="enabled">
+      <input id="enabled" type="checkbox">
+      Enable live analysis requests
+    </label>
+    <button id="save" type="button">Save settings</button>
+    <button id="test-connection" type="button">Test connection</button>
+    <p class="section-title">Recent activity</p>
+    <div id="activity-log">Loading activity...</div>
+    <script src="popup.js"></script>
+  </body>
+  </html>
