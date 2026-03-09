@@ -182,6 +182,31 @@ function applyConfigToForm(config) {
   }
 }
 
+function saveConfig(config) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "SAFETY_NUDGES_SET_API_CONFIG",
+        config
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        if (response && response.ok) {
+          hasUserEditedForm = false;
+          resolve();
+          return;
+        }
+
+        reject(new Error("Could not save analysis settings."));
+      }
+    );
+  });
+}
+
 formNodes.forEach((node) => {
   const eventName = node === enabledNode || node === providerNode ? "change" : "input";
   node.addEventListener(eventName, markFormDirty);
@@ -233,37 +258,27 @@ if (saveButton) {
       testConnectionButton.disabled = true;
     }
 
-    chrome.runtime.sendMessage(
-      {
-        type: "SAFETY_NUDGES_SET_API_CONFIG",
-        config: collectConfigFromForm()
-      },
-      (response) => {
+    void saveConfig(collectConfigFromForm())
+      .then(() => {
         setButtonBusy(saveButton, false, "Save settings", "Saving...");
         if (testConnectionButton) {
           testConnectionButton.disabled = false;
         }
-
-        if (chrome.runtime.lastError) {
-          setStatus(`Could not save analysis settings: ${chrome.runtime.lastError.message}`);
-          return;
+        setStatus("Analysis settings saved.");
+        refreshRuntimeStatus();
+      })
+      .catch((error) => {
+        setButtonBusy(saveButton, false, "Save settings", "Saving...");
+        if (testConnectionButton) {
+          testConnectionButton.disabled = false;
         }
-
-        if (response && response.ok) {
-          hasUserEditedForm = false;
-          setStatus("Analysis settings saved.");
-          refreshRuntimeStatus();
-          return;
-        }
-
-        setStatus("Could not save analysis settings.");
-      }
-    );
+        setStatus(`Could not save analysis settings: ${error instanceof Error ? error.message : "Unknown error"}`);
+      });
   });
 }
 
 if (testConnectionButton) {
-  testConnectionButton.addEventListener("click", () => {
+  testConnectionButton.addEventListener("click", async () => {
     if (!hasLoadedConfig) {
       setStatus("Settings are still loading. Try again in a moment.");
       return;
@@ -271,10 +286,12 @@ if (testConnectionButton) {
 
     const currentConfig = collectConfigFromForm();
     const provider = currentConfig.provider || "openai";
+    const shouldSaveFirst = hasUserEditedForm;
     setPendingActivity("Connection test started", {
-      provider
+      provider,
+      savedSettings: shouldSaveFirst
     });
-    setStatus("Testing connection...");
+    setStatus(shouldSaveFirst ? "Saving settings and testing connection..." : "Testing connection...");
     renderActivity({
       activityLog: []
     });
@@ -284,6 +301,21 @@ if (testConnectionButton) {
     }
     startFastActivityPolling();
     refreshRuntimeStatus();
+
+    try {
+      await saveConfig(currentConfig);
+    } catch (error) {
+      clearPendingActivity();
+      stopFastActivityPolling();
+      setButtonBusy(testConnectionButton, false, "Test connection", "Testing...");
+      if (saveButton) {
+        saveButton.disabled = false;
+      }
+      setStatus(`Could not save analysis settings: ${error instanceof Error ? error.message : "Unknown error"}`);
+      refreshRuntimeStatus();
+      return;
+    }
+
     chrome.runtime.sendMessage(
       {
         type: "SAFETY_NUDGES_TEST_CONNECTION",
