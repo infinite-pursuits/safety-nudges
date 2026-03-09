@@ -490,7 +490,15 @@ async function callLocalEndpointAnalysis(payload, config, trace = null) {
   });
 
   if (!response.ok) {
-    throw new Error(`Analysis endpoint returned HTTP ${response.status}`);
+    const errorText = await response.text();
+    const truncatedError = errorText.slice(0, 500);
+    logEvent("error", "Local analysis endpoint returned an error response", {
+      requestId: trace ? trace.requestId : null,
+      endpoint: config.endpoint,
+      httpStatus: response.status,
+      responseBody: truncatedError
+    });
+    throw new Error(`Analysis endpoint returned HTTP ${response.status}: ${truncatedError}`);
   }
 
   const raw = await response.json();
