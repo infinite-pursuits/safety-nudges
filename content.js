@@ -102,17 +102,19 @@ function buildFingerprint(payload) {
 }
 
 function readLatestConversationTurn() {
+  const promptNode = getLastTurnNode("user");
   const prompt = getLastTurnText("user");
   const responseNode = getLastTurnNode("assistant");
   const response = getNodeText(responseNode);
 
-  if (!prompt || !response || !responseNode) {
+  if (!prompt || !response || !responseNode || !promptNode) {
     return null;
   }
 
   return {
     pageUrl: window.location.href,
     prompt,
+    promptNode,
     response,
     capturedAt: new Date().toISOString(),
     conversationId: getConversationId(),
@@ -567,6 +569,256 @@ function ensureResponseAnchor(responseNode, fingerprint) {
   return anchor;
 }
 
+function unwrapNode(node) {
+  const parent = node.parentNode;
+  if (!parent) {
+    return;
+  }
+
+  while (node.firstChild) {
+    parent.insertBefore(node.firstChild, node);
+  }
+  parent.removeChild(node);
+}
+
+function clearInlineHighlights(node) {
+  if (!node) {
+    return;
+  }
+
+  const highlights = Array.from(node.querySelectorAll(".safety-nudges-inline-highlight"));
+  for (const highlight of highlights) {
+    unwrapNode(highlight);
+  }
+}
+
+function buildNormalizedTextMap(rootNode) {
+  if (!rootNode) {
+    return { text: "", chars: [] };
+  }
+
+  const walker = document.createTreeWalker(
+    rootNode,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        if (!node || !node.textContent) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        const parent = node.parentElement;
+        if (!parent) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        if (parent.closest(".safety-nudges-response-anchor") || parent.closest(".safety-nudges-inline-highlight")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    }
+  );
+
+  const rawChars = [];
+  let currentNode = walker.nextNode();
+  while (currentNode) {
+    const text = currentNode.textContent || "";
+    for (let index = 0; index < text.length; index += 1) {
+      rawChars.push({
+        char: text[index],
+        node: currentNode,
+        startOffset: index,
+        endOffset: index + 1
+      });
+    }
+    currentNode = walker.nextNode();
+  }
+
+  const normalizedChars = [];
+  let pendingWhitespace = null;
+  for (const rawChar of rawChars) {
+    if (/\s/.test(rawChar.char)) {
+      if (!pendingWhitespace) {
+        pendingWhitespace = {
+          startNode: rawChar.node,
+          startOffset: rawChar.startOffset,
+          endNode: rawChar.node,
+          endOffset: rawChar.endOffset
+        };
+      } else {
+        pendingWhitespace.endNode = rawChar.node;
+        pendingWhitespace.endOffset = rawChar.endOffset;
+      }
+      continue;
+    }
+
+    if (pendingWhitespace && normalizedChars.length > 0) {
+      normalizedChars.push({
+        char: " ",
+        startNode: pendingWhitespace.startNode,
+        startOffset: pendingWhitespace.startOffset,
+        endNode: pendingWhitespace.endNode,
+        endOffset: pendingWhitespace.endOffset
+      });
+    }
+
+    pendingWhitespace = null;
+    normalizedChars.push({
+      char: rawChar.char,
+      startNode: rawChar.node,
+      startOffset: rawChar.startOffset,
+      endNode: rawChar.node,
+      endOffset: rawChar.endOffset
+    });
+  }
+
+  return {
+    text: normalizedChars.map((entry) => entry.char).join(""),
+    chars: normalizedChars
+  };
+}
+
+function chooseHighlightSpecs(result, turnIndex) {
+  const issues = Array.isArray(result && result.issues) ? result.issues : [];
+  const candidates = [];
+
+  for (const issue of issues) {
+    const spans = Array.isArray(issue && issue.evidenceSpans) ? issue.evidenceSpans : [];
+    for (const span of spans) {
+      if (!span || span.turnIndex !== turnIndex) {
+        continue;
+      }
+
+      candidates.push({
+        startChar: span.startChar,
+        endChar: span.endChar,
+        text: span.text,
+        comment: span.rationale || (issue && issue.rationale) || "",
+        severity: issue && issue.severity === "high" ? "major" : "minor"
+      });
+    }
+  }
+
+  candidates.sort((left, right) => {
+    const leftPriority = left.severity === "major" ? 0 : 1;
+    const rightPriority = right.severity === "major" ? 0 : 1;
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+    if (left.startChar !== right.startChar) {
+      return left.startChar - right.startChar;
+    }
+    return right.endChar - left.endChar;
+  });
+
+  const selected = [];
+  for (const candidate of candidates) {
+    if (!candidate.comment) {
+      continue;
+    }
+    const overlaps = selected.some(
+      (existing) => candidate.startChar < existing.endChar && candidate.endChar > existing.startChar
+    );
+    if (overlaps) {
+      continue;
+    }
+    selected.push(candidate);
+  }
+
+  return selected.sort((left, right) => {
+    if (left.startChar !== right.startChar) {
+      return right.startChar - left.startChar;
+    }
+    return right.endChar - left.endChar;
+  });
+}
+
+function wrapHighlightRange(rootNode, spec) {
+  const normalizedMap = buildNormalizedTextMap(rootNode);
+  const chars = normalizedMap.chars;
+  if (
+    !spec ||
+    typeof spec.startChar !== "number" ||
+    typeof spec.endChar !== "number" ||
+    spec.startChar < 0 ||
+    spec.endChar <= spec.startChar ||
+    spec.endChar > chars.length
+  ) {
+    return false;
+  }
+
+  const expectedText = chars
+    .slice(spec.startChar, spec.endChar)
+    .map((entry) => entry.char)
+    .join("");
+  if (expectedText !== spec.text) {
+    return false;
+  }
+
+  const startEntry = chars[spec.startChar];
+  const endEntry = chars[spec.endChar - 1];
+  if (!startEntry || !endEntry) {
+    return false;
+  }
+
+  const range = document.createRange();
+  range.setStart(startEntry.startNode, startEntry.startOffset);
+  range.setEnd(endEntry.endNode, endEntry.endOffset);
+
+  const wrapper = document.createElement("span");
+  wrapper.className = "safety-nudges-inline-highlight";
+  wrapper.dataset.severity = spec.severity;
+  wrapper.dataset.comment = spec.comment;
+  wrapper.setAttribute("role", "note");
+  wrapper.setAttribute("tabindex", "0");
+  if (spec.comment) {
+    wrapper.setAttribute("aria-label", spec.comment);
+  }
+
+  try {
+    const fragment = range.extractContents();
+    wrapper.appendChild(fragment);
+    range.insertNode(wrapper);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function renderInlineHighlights(payload, analysisState) {
+  const promptNode = payload && payload.promptNode ? payload.promptNode : null;
+  const responseNode = payload && payload.responseNode ? payload.responseNode : null;
+
+  clearInlineHighlights(promptNode);
+  clearInlineHighlights(responseNode);
+
+  if (!analysisState || analysisState.status !== "complete") {
+    return;
+  }
+
+  const result = analysisState.result || { issueDetected: false, issues: [] };
+  if (!result.issueDetected) {
+    return;
+  }
+
+  const nodesByTurn = [
+    { turnIndex: 0, node: promptNode },
+    { turnIndex: 1, node: responseNode }
+  ];
+
+  for (const target of nodesByTurn) {
+    if (!target.node || !target.node.isConnected) {
+      continue;
+    }
+
+    const specs = chooseHighlightSpecs(result, target.turnIndex);
+    for (const spec of specs) {
+      wrapHighlightRange(target.node, spec);
+    }
+  }
+}
+
 function renderIssueList(listNode, result) {
   listNode.replaceChildren();
 
@@ -647,6 +899,8 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
 
   const result = analysisState.result || { issueDetected: false, issues: [] };
   const severity = analysisState.status === "error" ? "high" : inferSeverityFromResult(result);
+
+  renderInlineHighlights(payload, analysisState);
 
   anchor.dataset.state = analysisState.status;
   anchor.dataset.severity = severity;
