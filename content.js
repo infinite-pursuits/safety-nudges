@@ -877,6 +877,24 @@ function buildSpanDisplayMessage(result, highlightDiagnostics) {
   return `Inline highlights were not fully displayed: rendered ${highlightDiagnostics.renderedSpanCount} of ${evidenceSpanCount} evidence spans${reasonText}.`;
 }
 
+function maybeLogSpanDisplayMessage(payload, result, highlightDiagnostics) {
+  const spanDisplayMessage = buildSpanDisplayMessage(result, highlightDiagnostics);
+  if (!spanDisplayMessage) {
+    return;
+  }
+
+  void emitClientLog("Inline highlight diagnostics", {
+    conversationId: payload && payload.conversationId ? payload.conversationId : null,
+    message: spanDisplayMessage,
+    expectedSpanCount: highlightDiagnostics ? highlightDiagnostics.expectedSpanCount : 0,
+    renderedSpanCount: highlightDiagnostics ? highlightDiagnostics.renderedSpanCount : 0,
+    failureReasons:
+      highlightDiagnostics && Array.isArray(highlightDiagnostics.failureReasons)
+        ? Array.from(new Set(highlightDiagnostics.failureReasons))
+        : []
+  }, "warn");
+}
+
 function renderIssueList(listNode, result) {
   listNode.replaceChildren();
 
@@ -983,10 +1001,9 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
   }
 
   chipText.textContent = buildCompletionMessage(result);
-  const baseSummary = result.summary || buildCompletionMessage(result);
-  const spanDisplayMessage = buildSpanDisplayMessage(result, highlightDiagnostics);
-  summary.textContent = spanDisplayMessage ? `${baseSummary} ${spanDisplayMessage}` : baseSummary;
+  summary.textContent = result.summary || buildCompletionMessage(result);
   renderIssueList(issueList, result);
+  maybeLogSpanDisplayMessage(payload, result, highlightDiagnostics);
 }
 
 async function maybeAnalyzeLatestTurn() {
