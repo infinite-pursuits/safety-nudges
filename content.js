@@ -883,8 +883,18 @@ function maybeLogSpanDisplayMessage(payload, result, highlightDiagnostics) {
     return;
   }
 
+  const fingerprint = payload ? buildFingerprint(payload) : "";
+  const existingAnalysis = fingerprint ? state.analysesByFingerprint.get(fingerprint) : null;
+  if (existingAnalysis && existingAnalysis.lastSpanDiagnosticMessage === spanDisplayMessage) {
+    return;
+  }
+  if (existingAnalysis) {
+    existingAnalysis.lastSpanDiagnosticMessage = spanDisplayMessage;
+  }
+
   void emitClientLog("Inline highlight diagnostics", {
     conversationId: payload && payload.conversationId ? payload.conversationId : null,
+    fingerprint: fingerprint || null,
     message: spanDisplayMessage,
     expectedSpanCount: highlightDiagnostics ? highlightDiagnostics.expectedSpanCount : 0,
     renderedSpanCount: highlightDiagnostics ? highlightDiagnostics.renderedSpanCount : 0,
