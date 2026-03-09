@@ -745,7 +745,10 @@ function wrapHighlightRange(rootNode, spec) {
     spec.endChar <= spec.startChar ||
     spec.endChar > chars.length
   ) {
-    return false;
+    return {
+      ok: false,
+      reason: "span-offsets-out-of-range"
+    };
   }
 
   const expectedText = chars
@@ -753,13 +756,19 @@ function wrapHighlightRange(rootNode, spec) {
     .map((entry) => entry.char)
     .join("");
   if (expectedText !== spec.text) {
-    return false;
+    return {
+      ok: false,
+      reason: "span-text-mismatch"
+    };
   }
 
   const startEntry = chars[spec.startChar];
   const endEntry = chars[spec.endChar - 1];
   if (!startEntry || !endEntry) {
-    return false;
+    return {
+      ok: false,
+      reason: "span-boundary-missing"
+    };
   }
 
   const range = document.createRange();
@@ -780,9 +789,15 @@ function wrapHighlightRange(rootNode, spec) {
     const fragment = range.extractContents();
     wrapper.appendChild(fragment);
     range.insertNode(wrapper);
-    return true;
+    return {
+      ok: true,
+      reason: null
+    };
   } catch (_error) {
-    return false;
+    return {
+      ok: false,
+      reason: "dom-range-insert-failed"
+    };
   }
 }
 
@@ -794,18 +809,31 @@ function renderInlineHighlights(payload, analysisState) {
   clearInlineHighlights(responseNode);
 
   if (!analysisState || analysisState.status !== "complete") {
-    return;
+    return {
+      expectedSpanCount: 0,
+      renderedSpanCount: 0,
+      failureReasons: []
+    };
   }
 
   const result = analysisState.result || { issueDetected: false, issues: [] };
   if (!result.issueDetected) {
-    return;
+    return {
+      expectedSpanCount: 0,
+      renderedSpanCount: 0,
+      failureReasons: []
+    };
   }
 
   const nodesByTurn = [
     { turnIndex: 0, node: promptNode },
     { turnIndex: 1, node: responseNode }
   ];
+  const diagnostics = {
+    expectedSpanCount: 0,
+    renderedSpanCount: 0,
+    failureReasons: []
+  };
 
   for (const target of nodesByTurn) {
     if (!target.node || !target.node.isConnected) {
@@ -813,10 +841,40 @@ function renderInlineHighlights(payload, analysisState) {
     }
 
     const specs = chooseHighlightSpecs(result, target.turnIndex);
+    diagnostics.expectedSpanCount += specs.length;
     for (const spec of specs) {
-      wrapHighlightRange(target.node, spec);
+      const renderResult = wrapHighlightRange(target.node, spec);
+      if (renderResult.ok) {
+        diagnostics.renderedSpanCount += 1;
+      } else if (renderResult.reason) {
+        diagnostics.failureReasons.push(renderResult.reason);
+      }
     }
   }
+
+  return diagnostics;
+}
+
+function buildSpanDisplayMessage(result, highlightDiagnostics) {
+  const issues = Array.isArray(result && result.issues) ? result.issues : [];
+  const evidenceSpanCount = issues.reduce(
+    (total, issue) => total + (Array.isArray(issue && issue.evidenceSpans) ? issue.evidenceSpans.length : 0),
+    0
+  );
+
+  if (evidenceSpanCount === 0) {
+    return "No inline evidence spans were returned for this analysis.";
+  }
+
+  if (!highlightDiagnostics || highlightDiagnostics.renderedSpanCount === evidenceSpanCount) {
+    return "";
+  }
+
+  const failureReasons = Array.isArray(highlightDiagnostics.failureReasons)
+    ? Array.from(new Set(highlightDiagnostics.failureReasons))
+    : [];
+  const reasonText = failureReasons.length > 0 ? ` (${failureReasons.join(", ")})` : "";
+  return `Inline highlights were not fully displayed: rendered ${highlightDiagnostics.renderedSpanCount} of ${evidenceSpanCount} evidence spans${reasonText}.`;
 }
 
 function renderIssueList(listNode, result) {
@@ -900,7 +958,7 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
   const result = analysisState.result || { issueDetected: false, issues: [] };
   const severity = analysisState.status === "error" ? "high" : inferSeverityFromResult(result);
 
-  renderInlineHighlights(payload, analysisState);
+  const highlightDiagnostics = renderInlineHighlights(payload, analysisState);
 
   anchor.dataset.state = analysisState.status;
   anchor.dataset.severity = severity;
@@ -925,7 +983,9 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
   }
 
   chipText.textContent = buildCompletionMessage(result);
-  summary.textContent = result.summary || buildCompletionMessage(result);
+  const baseSummary = result.summary || buildCompletionMessage(result);
+  const spanDisplayMessage = buildSpanDisplayMessage(result, highlightDiagnostics);
+  summary.textContent = spanDisplayMessage ? `${baseSummary} ${spanDisplayMessage}` : baseSummary;
   renderIssueList(issueList, result);
 }
 
