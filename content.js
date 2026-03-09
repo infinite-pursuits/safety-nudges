@@ -946,17 +946,11 @@ async function maybeAnalyzeLatestTurn() {
       existingAnalysis.status === "analyzing" &&
       Date.now() - (existingAnalysis.lastAttemptAt || existingAnalysis.startedAt || 0) > STALE_ANALYSIS_RETRY_MS
     ) {
-      const canLogRetry = await emitClientLog("Detected stale analyzing state; re-dispatching analysis", {
+      void emitClientLog("Detected stale analyzing state; re-dispatching analysis", {
         conversationId: payload.conversationId || null,
         fingerprint,
         attemptCount: (existingAnalysis.attemptCount || 1) + 1
       });
-      if (!canLogRetry) {
-        existingAnalysis.status = "error";
-        existingAnalysis.message = "Background worker unavailable before retrying analysis.";
-        renderResponseIndicator(payload, fingerprint, existingAnalysis);
-        return;
-      }
 
       existingAnalysis.lastAttemptAt = Date.now();
       existingAnalysis.attemptCount = (existingAnalysis.attemptCount || 1) + 1;
@@ -965,21 +959,10 @@ async function maybeAnalyzeLatestTurn() {
       return;
     }
   } else {
-    const canLogStart = await emitClientLog("Response marked as analyzing in content script", {
+    void emitClientLog("Response marked as analyzing in content script", {
       conversationId: payload.conversationId || null,
       fingerprint
     });
-    if (!canLogStart) {
-      state.analysesByFingerprint.set(fingerprint, {
-        status: "error",
-        result: null,
-        message: state.extensionRecoveryAttempted
-          ? "Safety Nudges was reloaded. Refreshing the page to restore analysis..."
-          : "Background worker unavailable before starting analysis."
-      });
-      renderResponseIndicator(payload, fingerprint, state.analysesByFingerprint.get(fingerprint));
-      return;
-    }
 
     const inFlightState = {
       status: "analyzing",
