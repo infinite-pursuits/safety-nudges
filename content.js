@@ -213,59 +213,79 @@ function sendAnalysisMessageOnce(payload, timeoutMs) {
       resolve(null);
     }, timeoutMs);
 
-    chrome.runtime.sendMessage(
-      {
-        type: "SAFETY_NUDGES_ANALYZE_LATEST_TURN",
-        payload: serializedPayload
-      },
-      (response) => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        window.clearTimeout(timeoutId);
-
-        if (chrome.runtime.lastError) {
-          const errorMessage = chrome.runtime.lastError.message;
-          if (isRecoverableExtensionError(errorMessage)) {
-            attemptExtensionContextRecovery("analysis-message");
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: "SAFETY_NUDGES_ANALYZE_LATEST_TURN",
+          payload: serializedPayload
+        },
+        (response) => {
+          if (settled) {
+            return;
           }
-          emitClientLog(
-            "Content script analysis message failed before background acknowledgement",
-            {
-              conversationId: serializedPayload.conversationId || null,
-              error: errorMessage
-            },
-            "error"
-          );
-          resolve({
-            ok: false,
-            error: `Extension messaging failed: ${errorMessage}`,
-            shouldRetry: true
+
+          settled = true;
+          window.clearTimeout(timeoutId);
+
+          if (chrome.runtime.lastError) {
+            const errorMessage = chrome.runtime.lastError.message;
+            const shouldReload = isRecoverableExtensionError(errorMessage);
+            if (shouldReload) {
+              attemptExtensionContextRecovery("analysis-message");
+            }
+            emitClientLog(
+              "Content script analysis message failed before background acknowledgement",
+              {
+                conversationId: serializedPayload.conversationId || null,
+                error: errorMessage
+              },
+              "error"
+            );
+            resolve({
+              ok: false,
+              error: `Extension messaging failed: ${errorMessage}`,
+              shouldRetry: !shouldReload
+            });
+            return;
+          }
+
+          if (!response) {
+            emitClientLog(
+              "Content script received no response payload from background worker",
+              {
+                conversationId: serializedPayload.conversationId || null
+              },
+              "warn"
+            );
+            resolve(null);
+            return;
+          }
+
+          emitClientLog("Content script received background analysis response", {
+            conversationId: serializedPayload.conversationId || null,
+            ok: Boolean(response.ok)
           });
-          return;
+          resolve(response);
         }
-
-        if (!response) {
-          emitClientLog(
-            "Content script received no response payload from background worker",
-            {
-              conversationId: serializedPayload.conversationId || null
-            },
-            "warn"
-          );
-          resolve(null);
-          return;
-        }
-
-        emitClientLog("Content script received background analysis response", {
-          conversationId: serializedPayload.conversationId || null,
-          ok: Boolean(response.ok)
-        });
-        resolve(response);
+      );
+    } catch (error) {
+      if (settled) {
+        return;
       }
-    );
+
+      settled = true;
+      window.clearTimeout(timeoutId);
+      const errorMessage = error instanceof Error ? error.message : "Unknown extension messaging error";
+      const shouldReload = isRecoverableExtensionError(errorMessage);
+      if (shouldReload) {
+        attemptExtensionContextRecovery("analysis-message-throw");
+      }
+      resolve({
+        ok: false,
+        error: `Extension messaging failed: ${errorMessage}`,
+        shouldRetry: !shouldReload
+      });
+    }
   });
 }
 
@@ -1029,22 +1049,18 @@ async function maybeAnalyzeLatestTurn() {
   const fingerprint = buildFingerprint(payload);
   const existingAnalysis = state.analysesByFingerprint.get(fingerprint);
   if (existingAnalysis) {
-    if (
-      existingAnalysis.status === "analyzing" &&
-      Date.now() - (existingAnalysis.lastAttemptAt || existingAnalysis.startedAt || 0) > STALE_ANALYSIS_RETRY_MS
-    ) {
-      void emitClientLog("Detected stale analyzing state; re-dispatching analysis", {
-        conversationId: payload.conversationId || null,
-        fingerprint,
-        attemptCount: (existingAnalysis.attemptCount || 1) + 1
-      });
-
-      existingAnalysis.lastAttemptAt = Date.now();
-      existingAnalysis.attemptCount = (existingAnalysis.attemptCount || 1) + 1;
-    } else {
+    if (existingAnalysis.status === "analyzing") {
+      if (Date.now() - (existingAnalysis.startedAt || 0) > ANALYSIS_RESPONSE_TIMEOUT_MS) {
+        existingAnalysis.status = "error";
+        existingAnalysis.message = state.extensionRecoveryAttempted
+          ? "Safety Nudges reloaded. Refreshing the page should restore analysis."
+          : "Analysis timed out before the extension worker returned a result.";
+      }
       renderResponseIndicator(payload, fingerprint, existingAnalysis);
       return;
     }
+    renderResponseIndicator(payload, fingerprint, existingAnalysis);
+    return;
   } else {
     void emitClientLog("Response marked as analyzing in content script", {
       conversationId: payload.conversationId || null,
