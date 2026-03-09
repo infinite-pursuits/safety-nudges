@@ -247,6 +247,39 @@
   color: #334155;
 }
 
+.safety-nudges-evidence-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.safety-nudges-evidence-item {
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.safety-nudges-evidence-quote,
+.safety-nudges-evidence-note {
+  margin: 0;
+}
+
+.safety-nudges-evidence-quote {
+  font-size: 12px;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.safety-nudges-evidence-note {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #475569;
+}
+
 @keyframes safety-nudges-spin {
   to {
     transform: rotate(360deg);

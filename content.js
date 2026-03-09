@@ -597,6 +597,31 @@ function renderIssueList(listNode, result) {
       issue && issue.rationale ? issue.rationale : "Potential issue detected in this response.";
 
     details.append(title, rationale);
+
+    const evidenceSpans = Array.isArray(issue && issue.evidenceSpans) ? issue.evidenceSpans : [];
+    if (evidenceSpans.length > 0) {
+      const evidenceList = document.createElement("ul");
+      evidenceList.className = "safety-nudges-evidence-list";
+
+      for (const span of evidenceSpans) {
+        const evidenceItem = document.createElement("li");
+        evidenceItem.className = "safety-nudges-evidence-item";
+
+        const quote = document.createElement("p");
+        quote.className = "safety-nudges-evidence-quote";
+        quote.textContent = `"${span.text}"`;
+
+        const note = document.createElement("p");
+        note.className = "safety-nudges-evidence-note";
+        note.textContent = span.rationale || "Evidence span.";
+
+        evidenceItem.append(quote, note);
+        evidenceList.appendChild(evidenceItem);
+      }
+
+      details.appendChild(evidenceList);
+    }
+
     item.append(severity, details);
     listNode.appendChild(item);
   }
