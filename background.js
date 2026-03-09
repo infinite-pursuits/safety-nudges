@@ -17,6 +17,7 @@ const DEFAULT_API_CONFIG = {
 
 const MAX_ACTIVITY_LOGS = 40;
 const NETWORK_TIMEOUT_MS = 30000;
+const ACTIVITY_LOG_DEDUPE_WINDOW_MS = 1500;
 const activeAnalysisRequests = new Map();
 let analysisRequestSequence = 0;
 
@@ -26,7 +27,9 @@ const runtimeState = {
     state: "idle",
     message: "No analysis has run yet.",
     timestamp: null
-  }
+  },
+  lastLogSignature: null,
+  lastLogAtMs: 0
 };
 
 function persistRuntimeState() {
@@ -144,7 +147,33 @@ function formatOllamaHttpError(response, errorText, endpoint) {
   return `Ollama API returned HTTP ${response.status}: ${truncatedText}`;
 }
 
+function safeJsonStringify(value, maxChars = 6000) {
+  try {
+    const serialized = JSON.stringify(value);
+    if (typeof serialized !== "string") {
+      return null;
+    }
+    return serialized.length > maxChars ? `${serialized.slice(0, maxChars)}...` : serialized;
+  } catch (_error) {
+    return null;
+  }
+}
+
 function logEvent(level, message, details = null) {
+  const signature = safeJsonStringify({
+    level,
+    message,
+    details
+  });
+  const currentMs = nowMs();
+  if (
+    signature &&
+    runtimeState.lastLogSignature === signature &&
+    currentMs - runtimeState.lastLogAtMs < ACTIVITY_LOG_DEDUPE_WINDOW_MS
+  ) {
+    return;
+  }
+
   const entry = {
     level,
     message,
@@ -159,6 +188,8 @@ function logEvent(level, message, details = null) {
     message,
     timestamp: entry.timestamp
   };
+  runtimeState.lastLogSignature = signature;
+  runtimeState.lastLogAtMs = currentMs;
 
   const consoleMethod = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
   consoleMethod("[safety-nudges]", message, details || "");
@@ -398,6 +429,21 @@ function countEvidenceSpans(issues) {
     : 0;
 }
 
+function summarizeRawIssueSpans(rawPayload) {
+  const issues = Array.isArray(rawPayload && rawPayload.issues) ? rawPayload.issues : [];
+  return issues.map((issue, index) => {
+    const snakeSpans = Array.isArray(issue && issue.evidence_spans) ? issue.evidence_spans.length : 0;
+    const camelSpans = Array.isArray(issue && issue.evidenceSpans) ? issue.evidenceSpans.length : 0;
+    return {
+      index,
+      issueId: issue && typeof issue.issue_id === "string" ? issue.issue_id : null,
+      actor: issue && typeof issue.actor === "string" ? issue.actor : null,
+      snakeSpanCount: snakeSpans,
+      camelSpanCount: camelSpans
+    };
+  });
+}
+
 function normalizeEvidenceSpans(rawIssue, prompt, response) {
   if (!rawIssue || typeof rawIssue !== "object") {
     return [];
@@ -549,7 +595,8 @@ async function callLocalEndpointAnalysis(payload, config, trace = null) {
   logEvent("info", "Local analysis raw payload", {
     requestId: trace ? trace.requestId : null,
     endpoint: config.endpoint,
-    rawPayload: raw
+    rawPayloadJson: safeJsonStringify(raw),
+    rawIssueSpanSummary: summarizeRawIssueSpans(raw)
   });
   logEvent("info", "Received local analysis response", {
     requestId: trace ? trace.requestId : null,
@@ -565,7 +612,8 @@ async function callLocalEndpointAnalysis(payload, config, trace = null) {
       requestId: trace ? trace.requestId : null,
       endpoint: config.endpoint,
       source: normalized.source,
-      rawPayload: raw
+      rawPayloadJson: safeJsonStringify(raw),
+      rawIssueSpanSummary: summarizeRawIssueSpans(raw)
     });
   }
   return normalized;
@@ -632,7 +680,8 @@ async function callOpenAiAnalysis(payload, config, trace = null) {
   logEvent("info", "OpenAI analysis raw payload", {
     requestId: trace ? trace.requestId : null,
     model: requestBody.model,
-    rawPayload: parsed
+    rawPayloadJson: safeJsonStringify(parsed),
+    rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
   });
 
   const normalized = normalizeAnalysisResponse(parsed, payload);
@@ -641,7 +690,8 @@ async function callOpenAiAnalysis(payload, config, trace = null) {
       requestId: trace ? trace.requestId : null,
       model: requestBody.model,
       source: normalized.source,
-      rawPayload: parsed
+      rawPayloadJson: safeJsonStringify(parsed),
+      rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
     });
   }
   return normalized;
@@ -701,7 +751,8 @@ async function callOllamaAnalysis(payload, config, trace = null) {
     requestId: trace ? trace.requestId : null,
     endpoint,
     model: requestBody.model,
-    rawPayload: parsed
+    rawPayloadJson: safeJsonStringify(parsed),
+    rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
   });
 
   const normalized = normalizeAnalysisResponse(parsed, payload);
@@ -711,7 +762,8 @@ async function callOllamaAnalysis(payload, config, trace = null) {
       endpoint,
       model: requestBody.model,
       source: normalized.source,
-      rawPayload: parsed
+      rawPayloadJson: safeJsonStringify(parsed),
+      rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
     });
   }
   return normalized;
