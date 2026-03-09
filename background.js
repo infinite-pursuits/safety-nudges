@@ -382,6 +382,10 @@ function normalizeIssue(rawIssue, index) {
   };
 }
 
+function normalizeSpanText(value) {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
+
 function normalizeEvidenceSpans(rawIssue, prompt, response) {
   if (!rawIssue || typeof rawIssue !== "object") {
     return [];
@@ -389,7 +393,11 @@ function normalizeEvidenceSpans(rawIssue, prompt, response) {
 
   const actor = rawIssue.actor;
   const expectedTurn = actor === "user" ? 0 : actor === "assistant" ? 1 : null;
-  const spans = Array.isArray(rawIssue.evidence_spans) ? rawIssue.evidence_spans : [];
+  const spans = Array.isArray(rawIssue.evidence_spans)
+    ? rawIssue.evidence_spans
+    : Array.isArray(rawIssue.evidenceSpans)
+      ? rawIssue.evidenceSpans
+      : [];
   const turnText = {
     0: typeof prompt === "string" ? prompt : "",
     1: typeof response === "string" ? response : ""
@@ -397,12 +405,36 @@ function normalizeEvidenceSpans(rawIssue, prompt, response) {
   const normalized = [];
 
   for (const span of spans.slice(0, 3)) {
-    const turnIndex = span && Number.isInteger(span.turn_index) ? span.turn_index : null;
-    const startChar = span && Number.isInteger(span.start_char) ? span.start_char : null;
-    const endChar = span && Number.isInteger(span.end_char) ? span.end_char : null;
+    const turnIndex =
+      span && Number.isInteger(span.turn_index)
+        ? span.turn_index
+        : span && Number.isInteger(span.turnIndex)
+          ? span.turnIndex
+          : null;
+    const startChar =
+      span && Number.isInteger(span.start_char)
+        ? span.start_char
+        : span && Number.isInteger(span.startChar)
+          ? span.startChar
+          : null;
+    const endChar =
+      span && Number.isInteger(span.end_char)
+        ? span.end_char
+        : span && Number.isInteger(span.endChar)
+          ? span.endChar
+          : null;
     const text = span && typeof span.text === "string" ? span.text : "";
-    const rationale = span && typeof span.rationale === "string" ? span.rationale : "";
+    const rationale =
+      span && typeof span.rationale === "string" && span.rationale
+        ? span.rationale
+        : rawIssue && typeof rawIssue.rationale === "string"
+          ? rawIssue.rationale
+          : "";
     const content = turnIndex === 0 || turnIndex === 1 ? turnText[turnIndex] : "";
+    const contentSlice =
+      startChar !== null && endChar !== null && endChar <= content.length ? content.slice(startChar, endChar) : "";
+    const normalizedText = normalizeSpanText(text);
+    const normalizedContentSlice = normalizeSpanText(contentSlice);
 
     if (
       expectedTurn === null ||
@@ -412,9 +444,8 @@ function normalizeEvidenceSpans(rawIssue, prompt, response) {
       startChar < 0 ||
       endChar <= startChar ||
       !text ||
-      !rationale ||
       endChar > content.length ||
-      content.slice(startChar, endChar) !== text
+      normalizedContentSlice !== normalizedText
     ) {
       continue;
     }
@@ -423,7 +454,7 @@ function normalizeEvidenceSpans(rawIssue, prompt, response) {
       turnIndex,
       startChar,
       endChar,
-      text,
+      text: contentSlice || text,
       rationale
     });
   }
@@ -502,13 +533,22 @@ async function callLocalEndpointAnalysis(payload, config, trace = null) {
   }
 
   const raw = await response.json();
+  const normalized = normalizeAnalysisResponse(raw, payload);
   logEvent("info", "Received local analysis response", {
     requestId: trace ? trace.requestId : null,
     endpoint: config.endpoint,
     httpStatus: response.status,
-    latencyMs: elapsedMs(startedAtMs)
+    latencyMs: elapsedMs(startedAtMs),
+    source: normalized.source,
+    issueCount: Array.isArray(normalized.issues) ? normalized.issues.length : 0,
+    evidenceSpanCount: Array.isArray(normalized.issues)
+      ? normalized.issues.reduce(
+          (total, issue) => total + (Array.isArray(issue && issue.evidenceSpans) ? issue.evidenceSpans.length : 0),
+          0
+        )
+      : 0
   });
-  return normalizeAnalysisResponse(raw, payload);
+  return normalized;
 }
 
 async function callOpenAiAnalysis(payload, config, trace = null) {
