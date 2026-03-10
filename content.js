@@ -554,29 +554,33 @@ function getViewportTopLimit(anchorRect) {
     new Set([
       Math.max(16, Math.min(window.innerWidth - 16, anchorRect.right - 16)),
       Math.max(16, Math.min(window.innerWidth - 16, window.innerWidth / 2)),
-      Math.max(16, Math.min(window.innerWidth - 16, window.innerWidth - 32))
+      Math.max(16, Math.min(window.innerWidth - 16, window.innerWidth - 32)),
+      Math.max(16, Math.min(window.innerWidth - 16, 32))
     ])
   );
+  const sampleYs = [8, 24, 40];
 
   let obstructionBottom = fallbackTop;
-  for (const x of sampleXs) {
-    const stack = document.elementsFromPoint(x, 8);
-    for (const element of stack) {
-      if (shouldIgnoreViewportBlocker(element)) {
-        continue;
-      }
+  for (const y of sampleYs) {
+    for (const x of sampleXs) {
+      const stack = document.elementsFromPoint(x, y);
+      for (const element of stack) {
+        if (shouldIgnoreViewportBlocker(element)) {
+          continue;
+        }
 
-      const style = window.getComputedStyle(element);
-      if (style.position !== "fixed" && style.position !== "sticky") {
-        continue;
-      }
+        const style = window.getComputedStyle(element);
+        if (style.position !== "fixed" && style.position !== "sticky") {
+          continue;
+        }
 
-      const rect = element.getBoundingClientRect();
-      if (rect.top > 4 || rect.height < 40) {
-        continue;
-      }
+        const rect = element.getBoundingClientRect();
+        if (rect.top > 48 || rect.bottom < y || rect.height < 40) {
+          continue;
+        }
 
-      obstructionBottom = Math.max(obstructionBottom, rect.bottom);
+        obstructionBottom = Math.max(obstructionBottom, rect.bottom);
+      }
     }
   }
 
