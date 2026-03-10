@@ -938,8 +938,9 @@ function buildSpanDisplayMessage(result, highlightDiagnostics) {
     (total, issue) => total + (Array.isArray(issue && issue.evidenceSpans) ? issue.evidenceSpans.length : 0),
     0
   );
+  const issueDetected = Boolean(result && result.issueDetected);
 
-  if (evidenceSpanCount === 0) {
+  if (issueDetected && evidenceSpanCount === 0) {
     return "No inline evidence spans were returned for this analysis.";
   }
 
