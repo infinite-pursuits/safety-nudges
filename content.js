@@ -35,6 +35,14 @@ function getIssueCount(result) {
   return Array.isArray(result && result.issues) ? result.issues.length : 0;
 }
 
+function getEvidenceSpanCount(result) {
+  const issues = Array.isArray(result && result.issues) ? result.issues : [];
+  return issues.reduce(
+    (total, issue) => total + (Array.isArray(issue && issue.evidenceSpans) ? issue.evidenceSpans.length : 0),
+    0
+  );
+}
+
 function inferSeverityFromResult(result) {
   const issues = Array.isArray(result && result.issues) ? result.issues : [];
   if (issues.length === 0) {
@@ -607,8 +615,38 @@ function clearInlineHighlights(node) {
   }
 
   const highlights = Array.from(node.querySelectorAll(".safety-nudges-inline-highlight"));
+  const parentsToNormalize = new Set();
   for (const highlight of highlights) {
+    if (highlight.parentNode) {
+      parentsToNormalize.add(highlight.parentNode);
+    }
     unwrapNode(highlight);
+  }
+
+  for (const parent of parentsToNormalize) {
+    if (parent && typeof parent.normalize === "function") {
+      parent.normalize();
+    }
+  }
+}
+
+function buildHighlightSignature(result) {
+  const issues = Array.isArray(result && result.issues) ? result.issues : [];
+  const signaturePayload = issues.map((issue) => ({
+    id: issue && issue.id ? issue.id : null,
+    spans: Array.isArray(issue && issue.evidenceSpans)
+      ? issue.evidenceSpans.map((span) => ({
+          turnIndex: span && typeof span.turnIndex === "number" ? span.turnIndex : null,
+          text: span && typeof span.text === "string" ? span.text : "",
+          rationale: span && typeof span.rationale === "string" ? span.rationale : ""
+        }))
+      : []
+  }));
+
+  try {
+    return JSON.stringify(signaturePayload);
+  } catch (_error) {
+    return "";
   }
 }
 
@@ -825,10 +863,9 @@ function renderInlineHighlights(payload, analysisState) {
   const promptNode = payload && payload.promptNode ? payload.promptNode : null;
   const responseNode = payload && payload.responseNode ? payload.responseNode : null;
 
-  clearInlineHighlights(promptNode);
-  clearInlineHighlights(responseNode);
-
   if (!analysisState || analysisState.status !== "complete") {
+    clearInlineHighlights(promptNode);
+    clearInlineHighlights(responseNode);
     return {
       expectedSpanCount: 0,
       renderedSpanCount: 0,
@@ -838,12 +875,26 @@ function renderInlineHighlights(payload, analysisState) {
 
   const result = analysisState.result || { issueDetected: false, issues: [] };
   if (!result.issueDetected) {
+    clearInlineHighlights(promptNode);
+    clearInlineHighlights(responseNode);
     return {
       expectedSpanCount: 0,
       renderedSpanCount: 0,
       failureReasons: []
     };
   }
+
+  const highlightSignature = buildHighlightSignature(result);
+  if (analysisState.lastRenderedHighlightSignature === highlightSignature) {
+    return {
+      expectedSpanCount: getEvidenceSpanCount(result),
+      renderedSpanCount: getEvidenceSpanCount(result),
+      failureReasons: []
+    };
+  }
+
+  clearInlineHighlights(promptNode);
+  clearInlineHighlights(responseNode);
 
   const nodesByTurn = [
     { turnIndex: 0, node: promptNode },
@@ -870,6 +921,12 @@ function renderInlineHighlights(payload, analysisState) {
         diagnostics.failureReasons.push(renderResult.reason);
       }
     }
+  }
+
+  if (diagnostics.expectedSpanCount === diagnostics.renderedSpanCount && diagnostics.failureReasons.length === 0) {
+    analysisState.lastRenderedHighlightSignature = highlightSignature;
+  } else {
+    analysisState.lastRenderedHighlightSignature = "";
   }
 
   return diagnostics;
@@ -1135,6 +1192,22 @@ function scheduleAnalysis(reason) {
   }, QUIET_PERIOD_MS);
 }
 
+function isInternalMutationNode(node) {
+  if (!node) {
+    return false;
+  }
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    return Boolean(node.parentElement && isInternalMutationNode(node.parentElement));
+  }
+
+  if (!(node instanceof Element)) {
+    return false;
+  }
+
+  return Boolean(node.closest(".safety-nudges-response-anchor") || node.closest(".safety-nudges-inline-highlight"));
+}
+
 function installMutationObserver() {
   const container = getConversationContainer();
   if (!container) {
@@ -1149,10 +1222,14 @@ function installMutationObserver() {
   state.observer = new MutationObserver((mutations) => {
     const hasRelevantMutation = mutations.some((mutation) => {
       if (mutation.type === "characterData") {
-        return true;
+        return !isInternalMutationNode(mutation.target);
       }
 
-      return mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0;
+      const addedNodes = Array.from(mutation.addedNodes || []);
+      const removedNodes = Array.from(mutation.removedNodes || []);
+      const externalAdded = addedNodes.some((node) => !isInternalMutationNode(node));
+      const externalRemoved = removedNodes.some((node) => !isInternalMutationNode(node));
+      return externalAdded || externalRemoved;
     });
 
     if (hasRelevantMutation) {
