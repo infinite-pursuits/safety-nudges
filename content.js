@@ -104,6 +104,10 @@ function getConversationId() {
   return pathParts.at(-1) || null;
 }
 
+function nowMs() {
+  return Date.now();
+}
+
 function isGenerationInProgress() {
   const buttons = Array.from(document.querySelectorAll("button"));
   const hasStopButton = buttons.some((button) => {
