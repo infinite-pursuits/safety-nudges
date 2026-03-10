@@ -734,30 +734,31 @@ function ensureExpandedFeedbackVisible(anchor) {
   }
 
   const panel = anchor.querySelector(".safety-nudges-response-panel");
+  const feedbackSection = anchor.querySelector(".safety-nudges-feedback-section");
+  const feedbackRow = anchor.querySelector(".safety-nudges-feedback-row");
   const commentWrap = anchor.querySelector(".safety-nudges-feedback-comment");
-  const actions = anchor.querySelector(".safety-nudges-feedback-actions");
-  if (!panel || panel.hidden || !commentWrap || commentWrap.hidden) {
+  if (!panel || panel.hidden || !feedbackSection || !commentWrap || commentWrap.hidden) {
     return;
   }
 
   updateResponsePanelPlacement(anchor);
 
   window.requestAnimationFrame(() => {
-    const targetNode = actions && !actions.hidden ? actions : commentWrap;
-    const targetRect = targetNode.getBoundingClientRect();
-    const anchorRect = anchor.getBoundingClientRect();
-    const viewportTopLimit = getViewportTopLimit(anchorRect);
-    const viewportBottomLimit = getViewportBottomLimit(anchorRect);
-    const safeTop = viewportTopLimit + 16;
-    const safeBottom = viewportBottomLimit - 16;
+    const topTarget = feedbackRow || feedbackSection;
+    const panelPadding = 8;
 
-    if (targetRect.bottom > safeBottom) {
-      window.scrollBy({
-        top: Math.ceil(targetRect.bottom - safeBottom),
+    if (panel.scrollHeight > panel.clientHeight) {
+      const sectionTop = Math.max(0, feedbackSection.offsetTop - panelPadding);
+      panel.scrollTo({
+        top: sectionTop,
         behavior: "smooth"
       });
-      return;
     }
+
+    const targetRect = topTarget.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const viewportTopLimit = getViewportTopLimit(anchorRect);
+    const safeTop = viewportTopLimit + 16;
 
     if (targetRect.top < safeTop) {
       window.scrollBy({
