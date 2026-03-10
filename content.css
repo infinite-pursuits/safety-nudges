@@ -203,11 +203,11 @@
   background: rgba(250, 204, 21, 0.16);
 }
 
-.safety-nudges-inline-tooltip {
+.safety-nudges-floating-tooltip {
   position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%);
+  left: 0;
+  top: 0;
+  transform: translate(-50%, calc(-100% - 8px));
   min-width: 140px;
   max-width: min(280px, 70vw);
   padding: 7px 9px;
@@ -216,6 +216,10 @@
   color: #f8fafc;
   font-size: 12px;
   font-family: "SF Pro Text", "Segoe UI", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: normal;
+  text-transform: none;
   line-height: 1.35;
   white-space: normal;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.2);
@@ -226,13 +230,11 @@
   z-index: 5;
 }
 
-.safety-nudges-inline-highlight[data-tooltip-placement="below"] .safety-nudges-inline-tooltip {
-  top: calc(100% + 8px);
-  bottom: auto;
+.safety-nudges-floating-tooltip[data-placement="below"] {
+  transform: translate(-50%, 8px);
 }
 
-.safety-nudges-inline-highlight:hover .safety-nudges-inline-tooltip,
-.safety-nudges-inline-highlight:focus-visible .safety-nudges-inline-tooltip {
+.safety-nudges-floating-tooltip[data-visible="true"] {
   opacity: 1;
   visibility: visible;
 }

@@ -11,6 +11,8 @@ const state = {
   observer: null,
   analyzeTimer: null,
   lastMutationAt: 0,
+  nextTooltipId: 0,
+  floatingTooltipNode: null,
   latestAssistantSnapshot: {
     node: null,
     text: "",
@@ -99,9 +101,7 @@ function getNodeText(node) {
   }
 
   const clone = node.cloneNode(true);
-  const injectedUi = Array.from(
-    clone.querySelectorAll(".safety-nudges-response-anchor, .safety-nudges-inline-tooltip")
-  );
+  const injectedUi = Array.from(clone.querySelectorAll(".safety-nudges-response-anchor"));
   for (const injectedNode of injectedUi) {
     injectedNode.remove();
   }
@@ -636,27 +636,68 @@ function updateInlineTooltipPlacement(highlightNode) {
     return;
   }
 
-  const tooltip = highlightNode.querySelector(".safety-nudges-inline-tooltip");
-  if (!(tooltip instanceof Element)) {
+  const tooltipId = highlightNode.dataset.tooltipId;
+  const comment = highlightNode.dataset.comment;
+  if (!tooltipId || !comment) {
     return;
   }
 
-  highlightNode.dataset.tooltipPlacement = "above";
-  const highlightRect = highlightNode.getBoundingClientRect();
+  const matchingHighlights = Array.from(document.querySelectorAll(`.safety-nudges-inline-highlight[data-tooltip-id="${tooltipId}"]`));
+  if (matchingHighlights.length === 0) {
+    return;
+  }
+
+  let left = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const node of matchingHighlights) {
+    const rect = node.getBoundingClientRect();
+    left = Math.min(left, rect.left);
+    right = Math.max(right, rect.right);
+    top = Math.min(top, rect.top);
+    bottom = Math.max(bottom, rect.bottom);
+  }
+
+  const tooltip = ensureFloatingTooltip();
+  tooltip.textContent = comment;
+  tooltip.dataset.visible = "true";
+  tooltip.dataset.placement = "above";
+  tooltip.style.left = `${Math.round((left + right) / 2)}px`;
+  tooltip.style.top = `${Math.round(top)}px`;
+
   const tooltipRect = tooltip.getBoundingClientRect();
-  const viewportTopLimit = getViewportTopLimit(highlightRect);
-  const viewportBottomLimit = getViewportBottomLimit(highlightRect);
+  const unionRect = { left, right, top, bottom };
+  const viewportTopLimit = getViewportTopLimit(unionRect);
+  const viewportBottomLimit = getViewportBottomLimit(unionRect);
   const gap = 8;
   const margin = 12;
-  const availableAbove = highlightRect.top - (viewportTopLimit + margin) - gap;
-  const availableBelow = viewportBottomLimit - highlightRect.bottom - gap - margin;
+  const availableAbove = top - (viewportTopLimit + margin) - gap;
+  const availableBelow = viewportBottomLimit - bottom - gap - margin;
+  tooltip.dataset.placement = tooltipRect.height > availableAbove && availableBelow > availableAbove ? "below" : "above";
+}
 
-  if (tooltipRect.height > availableAbove && availableBelow > availableAbove) {
-    highlightNode.dataset.tooltipPlacement = "below";
+function ensureFloatingTooltip() {
+  if (state.floatingTooltipNode && state.floatingTooltipNode.isConnected) {
+    return state.floatingTooltipNode;
+  }
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "safety-nudges-floating-tooltip";
+  tooltip.dataset.visible = "false";
+  tooltip.dataset.placement = "above";
+  document.body.appendChild(tooltip);
+  state.floatingTooltipNode = tooltip;
+  return tooltip;
+}
+
+function hideFloatingTooltip() {
+  const tooltip = state.floatingTooltipNode;
+  if (!tooltip) {
     return;
   }
 
-  highlightNode.dataset.tooltipPlacement = "above";
+  tooltip.dataset.visible = "false";
 }
 
 function refreshOpenResponsePanels() {
@@ -1005,6 +1046,9 @@ function wrapHighlightRange(rootNode, spec) {
       };
     }
 
+    state.nextTooltipId += 1;
+    const tooltipId = `tooltip-${state.nextTooltipId}`;
+
     for (let index = segments.length - 1; index >= 0; index -= 1) {
       const segment = segments[index];
       const textNode = segment.textNode;
@@ -1022,24 +1066,20 @@ function wrapHighlightRange(rootNode, spec) {
       wrapper.className = "safety-nudges-inline-highlight";
       wrapper.dataset.severity = spec.severity;
       wrapper.dataset.comment = spec.comment;
-      wrapper.dataset.tooltipPlacement = "above";
+      wrapper.dataset.tooltipId = tooltipId;
       wrapper.setAttribute("role", "note");
       wrapper.setAttribute("tabindex", "0");
       if (spec.comment) {
         wrapper.setAttribute("aria-label", spec.comment);
       }
-
-      const tooltip = document.createElement("span");
-      tooltip.className = "safety-nudges-inline-tooltip";
-      tooltip.textContent = spec.comment;
-      tooltip.setAttribute("aria-hidden", "true");
-      wrapper.appendChild(tooltip);
       wrapper.addEventListener("mouseenter", () => {
         updateInlineTooltipPlacement(wrapper);
       });
+      wrapper.addEventListener("mouseleave", hideFloatingTooltip);
       wrapper.addEventListener("focus", () => {
         updateInlineTooltipPlacement(wrapper);
       });
+      wrapper.addEventListener("blur", hideFloatingTooltip);
 
       const fragment = document.createDocumentFragment();
       if (beforeText) {
