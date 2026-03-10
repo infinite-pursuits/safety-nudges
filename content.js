@@ -574,8 +574,8 @@ function updateResponsePanelPlacement(anchor) {
     return;
   }
 
-  const margin = 12;
-  const gap = 10;
+  const margin = 20;
+  const gap = 12;
   const anchorRect = anchor.getBoundingClientRect();
   const panelRect = panel.getBoundingClientRect();
   const viewportTopLimit = getViewportTopLimit(anchorRect);
@@ -610,6 +610,34 @@ function updateResponsePanelPlacement(anchor) {
   const hiddenAnchorOffset = Math.max(0, anchorRect.top - safeBottom);
   panel.style.top = "auto";
   panel.style.bottom = `${anchor.offsetHeight + gap + hiddenAnchorOffset}px`;
+}
+
+function updateInlineTooltipPlacement(highlightNode) {
+  if (!(highlightNode instanceof Element)) {
+    return;
+  }
+
+  const tooltip = highlightNode.querySelector(".safety-nudges-inline-tooltip");
+  if (!(tooltip instanceof Element)) {
+    return;
+  }
+
+  highlightNode.dataset.tooltipPlacement = "above";
+  const highlightRect = highlightNode.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const viewportTopLimit = getViewportTopLimit(highlightRect);
+  const viewportBottomLimit = getViewportBottomLimit(highlightRect);
+  const gap = 8;
+  const margin = 12;
+  const availableAbove = highlightRect.top - (viewportTopLimit + margin) - gap;
+  const availableBelow = viewportBottomLimit - highlightRect.bottom - gap - margin;
+
+  if (tooltipRect.height > availableAbove && availableBelow > availableAbove) {
+    highlightNode.dataset.tooltipPlacement = "below";
+    return;
+  }
+
+  highlightNode.dataset.tooltipPlacement = "above";
 }
 
 function refreshOpenResponsePanels() {
@@ -975,17 +1003,30 @@ function wrapHighlightRange(rootNode, spec) {
       wrapper.className = "safety-nudges-inline-highlight";
       wrapper.dataset.severity = spec.severity;
       wrapper.dataset.comment = spec.comment;
+      wrapper.dataset.tooltipPlacement = "above";
       wrapper.setAttribute("role", "note");
       wrapper.setAttribute("tabindex", "0");
       if (spec.comment) {
         wrapper.setAttribute("aria-label", spec.comment);
       }
 
+      const tooltip = document.createElement("span");
+      tooltip.className = "safety-nudges-inline-tooltip";
+      tooltip.textContent = spec.comment;
+      tooltip.setAttribute("aria-hidden", "true");
+      wrapper.appendChild(tooltip);
+      wrapper.addEventListener("mouseenter", () => {
+        updateInlineTooltipPlacement(wrapper);
+      });
+      wrapper.addEventListener("focus", () => {
+        updateInlineTooltipPlacement(wrapper);
+      });
+
       const fragment = document.createDocumentFragment();
       if (beforeText) {
         fragment.appendChild(document.createTextNode(beforeText));
       }
-      wrapper.textContent = selectedText;
+      wrapper.appendChild(document.createTextNode(selectedText));
       fragment.appendChild(wrapper);
       if (afterText) {
         fragment.appendChild(document.createTextNode(afterText));
@@ -1161,30 +1202,6 @@ function renderIssueList(listNode, result) {
       issue && issue.rationale ? issue.rationale : "Potential issue detected in this response.";
 
     details.append(title, rationale);
-
-    const evidenceSpans = Array.isArray(issue && issue.evidenceSpans) ? issue.evidenceSpans : [];
-    if (evidenceSpans.length > 0) {
-      const evidenceList = document.createElement("ul");
-      evidenceList.className = "safety-nudges-evidence-list";
-
-      for (const span of evidenceSpans) {
-        const evidenceItem = document.createElement("li");
-        evidenceItem.className = "safety-nudges-evidence-item";
-
-        const quote = document.createElement("p");
-        quote.className = "safety-nudges-evidence-quote";
-        quote.textContent = `"${span.text}"`;
-
-        const note = document.createElement("p");
-        note.className = "safety-nudges-evidence-note";
-        note.textContent = span.rationale || "Evidence span.";
-
-        evidenceItem.append(quote, note);
-        evidenceList.appendChild(evidenceItem);
-      }
-
-      details.appendChild(evidenceList);
-    }
 
     item.append(severity, details);
     listNode.appendChild(item);

@@ -203,8 +203,7 @@
   background: rgba(250, 204, 21, 0.16);
 }
 
-.safety-nudges-inline-highlight::after {
-  content: attr(data-comment);
+.safety-nudges-inline-tooltip {
   position: absolute;
   left: 50%;
   bottom: calc(100% + 8px);
@@ -216,6 +215,7 @@
   background: rgba(15, 23, 42, 0.96);
   color: #f8fafc;
   font-size: 12px;
+  font-family: "SF Pro Text", "Segoe UI", sans-serif;
   line-height: 1.35;
   white-space: normal;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.2);
@@ -226,8 +226,13 @@
   z-index: 5;
 }
 
-.safety-nudges-inline-highlight:hover::after,
-.safety-nudges-inline-highlight:focus-visible::after {
+.safety-nudges-inline-highlight[data-tooltip-placement="below"] .safety-nudges-inline-tooltip {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+
+.safety-nudges-inline-highlight:hover .safety-nudges-inline-tooltip,
+.safety-nudges-inline-highlight:focus-visible .safety-nudges-inline-tooltip {
   opacity: 1;
   visibility: visible;
 }
