@@ -728,6 +728,46 @@ function updateResponsePanelPlacement(anchor) {
   panel.style.bottom = "auto";
 }
 
+function ensureExpandedFeedbackVisible(anchor) {
+  if (!anchor) {
+    return;
+  }
+
+  const panel = anchor.querySelector(".safety-nudges-response-panel");
+  const commentWrap = anchor.querySelector(".safety-nudges-feedback-comment");
+  const actions = anchor.querySelector(".safety-nudges-feedback-actions");
+  if (!panel || panel.hidden || !commentWrap || commentWrap.hidden) {
+    return;
+  }
+
+  updateResponsePanelPlacement(anchor);
+
+  window.requestAnimationFrame(() => {
+    const targetNode = actions && !actions.hidden ? actions : commentWrap;
+    const targetRect = targetNode.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const viewportTopLimit = getViewportTopLimit(anchorRect);
+    const viewportBottomLimit = getViewportBottomLimit(anchorRect);
+    const safeTop = viewportTopLimit + 16;
+    const safeBottom = viewportBottomLimit - 16;
+
+    if (targetRect.bottom > safeBottom) {
+      window.scrollBy({
+        top: Math.ceil(targetRect.bottom - safeBottom),
+        behavior: "smooth"
+      });
+      return;
+    }
+
+    if (targetRect.top < safeTop) {
+      window.scrollBy({
+        top: Math.floor(targetRect.top - safeTop),
+        behavior: "smooth"
+      });
+    }
+  });
+}
+
 function updateInlineTooltipPlacement(highlightNode) {
   if (!(highlightNode instanceof Element)) {
     return;
@@ -910,6 +950,7 @@ function ensureResponseAnchor(responseNode, fingerprint) {
         feedbackState.status = "idle";
         feedbackState.message = "";
         renderFeedbackSection(anchor, feedbackState);
+        ensureExpandedFeedbackVisible(anchor);
       });
     }
 
