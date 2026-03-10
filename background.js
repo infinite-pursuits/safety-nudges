@@ -10,6 +10,7 @@ const DEFAULT_API_CONFIG = {
   endpoint: "http://127.0.0.1:8787/analyze",
   ollamaEndpoint: "http://127.0.0.1:11434/api/chat",
   enabled: false,
+  identifySpans: true,
   openAiApiKey: "",
   openAiModel: "gpt-5-mini",
   ollamaModel: "llama3.1:8b"
@@ -218,6 +219,7 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
     ollamaEndpoint:
       config.ollamaEndpoint || existing.ollamaEndpoint || DEFAULT_API_CONFIG.ollamaEndpoint,
     enabled: Boolean(config.enabled),
+    identifySpans: config.identifySpans !== false,
     openAiApiKey:
       typeof config.openAiApiKey === "string" && config.openAiApiKey.trim()
         ? config.openAiApiKey.trim()
@@ -244,6 +246,7 @@ function setStoredApiConfig(config) {
           logEvent("info", "Analysis settings updated", {
             provider: nextConfig.provider,
             enabled: nextConfig.enabled,
+            identifySpans: nextConfig.identifySpans,
             openAiModel: nextConfig.openAiModel,
             ollamaModel: nextConfig.ollamaModel,
             localEndpoint: nextConfig.endpoint,
@@ -631,7 +634,7 @@ async function callLocalEndpointAnalysis(payload, config, trace = null) {
     issueCount: Array.isArray(normalized.issues) ? normalized.issues.length : 0,
     evidenceSpanCount: countEvidenceSpans(normalized.issues)
   });
-  if (normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
+  if (config.identifySpans !== false && normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
     logEvent("warn", "Local analysis returned issues without evidence spans", {
       requestId: trace ? trace.requestId : null,
       endpoint: config.endpoint,
@@ -709,7 +712,7 @@ async function callOpenAiAnalysis(payload, config, trace = null) {
   });
 
   const normalized = normalizeAnalysisResponse(parsed, payload);
-  if (normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
+  if (config.identifySpans !== false && normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
     logEvent("warn", "OpenAI analysis returned issues without evidence spans", {
       requestId: trace ? trace.requestId : null,
       model: requestBody.model,
@@ -780,7 +783,7 @@ async function callOllamaAnalysis(payload, config, trace = null) {
   });
 
   const normalized = normalizeAnalysisResponse(parsed, payload);
-  if (normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
+  if (config.identifySpans !== false && normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
     logEvent("warn", "Ollama analysis returned issues without evidence spans", {
       requestId: trace ? trace.requestId : null,
       endpoint,
@@ -1063,7 +1066,23 @@ async function analyzeLatestTurn(payload, trace = null) {
     });
   }
 
-  return result;
+  if (config.identifySpans === false) {
+    return {
+      ...result,
+      issues: Array.isArray(result.issues)
+        ? result.issues.map((issue) => ({
+            ...issue,
+            evidenceSpans: []
+          }))
+        : [],
+      spansEnabled: false
+    };
+  }
+
+  return {
+    ...result,
+    spansEnabled: true
+  };
 }
 
 function getOrCreateAnalysisRequest(payload) {

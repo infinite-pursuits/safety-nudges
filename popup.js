@@ -6,6 +6,7 @@ const localEndpointNode = document.getElementById("endpoint");
 const ollamaEndpointNode = document.getElementById("ollama-endpoint");
 const ollamaModelNode = document.getElementById("ollama-model");
 const enabledNode = document.getElementById("enabled");
+const identifySpansNode = document.getElementById("identify-spans");
 const saveButton = document.getElementById("save");
 const testConnectionButton = document.getElementById("test-connection");
 const activityLogNode = document.getElementById("activity-log");
@@ -23,7 +24,8 @@ const formNodes = [
   localEndpointNode,
   ollamaEndpointNode,
   ollamaModelNode,
-  enabledNode
+  enabledNode,
+  identifySpansNode
 ].filter(Boolean);
 
 function setStatus(message) {
@@ -144,7 +146,8 @@ function collectConfigFromForm() {
     endpoint: localEndpointNode ? localEndpointNode.value.trim() : "",
     ollamaEndpoint: ollamaEndpointNode ? ollamaEndpointNode.value.trim() : "",
     ollamaModel: ollamaModelNode ? ollamaModelNode.value.trim() : "",
-    enabled: enabledNode ? enabledNode.checked : false
+    enabled: enabledNode ? enabledNode.checked : false,
+    identifySpans: identifySpansNode ? identifySpansNode.checked : true
   };
 }
 
@@ -179,6 +182,10 @@ function applyConfigToForm(config) {
 
   if (enabledNode) {
     enabledNode.checked = Boolean(config.enabled);
+  }
+
+  if (identifySpansNode) {
+    identifySpansNode.checked = config.identifySpans !== false;
   }
 }
 

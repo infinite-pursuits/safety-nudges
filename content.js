@@ -1,7 +1,5 @@
 const ROOT_ID = "safety-nudges-root";
 const QUIET_PERIOD_MS = 1500;
-const RESPONSE_STABLE_MS = 2200;
-const RESPONSE_STABLE_WITH_ACTIONS_MS = 900;
 const ANALYSIS_RESPONSE_TIMEOUT_MS = 30000;
 const ANALYSIS_ATTEMPT_TIMEOUT_MS = 4000;
 const MAX_ANALYSIS_ATTEMPTS = 8;
@@ -13,11 +11,6 @@ const state = {
   lastMutationAt: 0,
   nextTooltipId: 0,
   floatingTooltipNode: null,
-  latestAssistantSnapshot: {
-    node: null,
-    text: "",
-    changedAt: 0
-  },
   analysesByFingerprint: new Map(),
   outsideClickInstalled: false,
   viewportListenersInstalled: false,
@@ -129,99 +122,10 @@ function nowMs() {
 
 function isGenerationInProgress() {
   const buttons = Array.from(document.querySelectorAll("button"));
-  const hasStopButton = buttons.some((button) => {
+  return buttons.some((button) => {
     const label = (button.getAttribute("aria-label") || button.innerText || "").trim().toLowerCase();
     return label.includes("stop generating") || label === "stop";
   });
-
-  if (hasStopButton) {
-    return true;
-  }
-
-  const busyNodes = Array.from(document.querySelectorAll('[aria-busy="true"]'));
-  return busyNodes.some((node) => {
-    if (!(node instanceof Element)) {
-      return false;
-    }
-
-    return Boolean(
-      node.closest("main") &&
-        !node.closest(".safety-nudges-response-anchor") &&
-        !node.closest(`#${ROOT_ID}`)
-    );
-  });
-}
-
-function hasStreamingUiHints(responseNode) {
-  if (!(responseNode instanceof Element)) {
-    return false;
-  }
-
-  const selectors = [
-    '[aria-busy="true"]',
-    '[data-testid*="typing"]',
-    '[data-testid*="stream"]',
-    '[data-testid*="cursor"]',
-    '[data-testid*="stop"]',
-    '.result-streaming',
-    '.animate-pulse',
-    '.animate-spin'
-  ];
-
-  return selectors.some((selector) => responseNode.querySelector(selector));
-}
-
-function hasPostResponseActions(responseNode) {
-  if (!(responseNode instanceof Element)) {
-    return false;
-  }
-
-  const nearbyButtons = Array.from(responseNode.parentElement ? responseNode.parentElement.querySelectorAll("button") : []);
-  return nearbyButtons.some((button) => {
-    const label = [
-      button.getAttribute("aria-label") || "",
-      button.getAttribute("title") || "",
-      button.innerText || ""
-    ]
-      .join(" ")
-      .trim()
-      .toLowerCase();
-
-    return label.includes("copy") || label.includes("share");
-  });
-}
-
-function isLatestAssistantTurnReady(payload) {
-  if (!payload || !payload.responseNode) {
-    return false;
-  }
-
-  if (isGenerationInProgress() || hasStreamingUiHints(payload.responseNode)) {
-    state.latestAssistantSnapshot = {
-      node: payload.responseNode,
-      text: payload.response,
-      changedAt: nowMs()
-    };
-    return false;
-  }
-
-  const sameNode = state.latestAssistantSnapshot.node === payload.responseNode;
-  const sameText = state.latestAssistantSnapshot.text === payload.response;
-
-  if (!sameNode || !sameText) {
-    state.latestAssistantSnapshot = {
-      node: payload.responseNode,
-      text: payload.response,
-      changedAt: nowMs()
-    };
-    return false;
-  }
-
-  const stableForMs = nowMs() - state.latestAssistantSnapshot.changedAt;
-  const requiredStableMs = hasPostResponseActions(payload.responseNode)
-    ? RESPONSE_STABLE_WITH_ACTIONS_MS
-    : RESPONSE_STABLE_MS;
-  return stableForMs >= requiredStableMs;
 }
 
 function buildFingerprint(payload) {
@@ -1156,9 +1060,21 @@ function renderInlineHighlights(payload, analysisState) {
   }
 
   const result = analysisState.result || { issueDetected: false, issues: [] };
+  if (result.spansEnabled === false) {
+    clearInlineHighlights(promptNode);
+    clearInlineHighlights(responseNode);
+    hideFloatingTooltip();
+    return {
+      expectedSpanCount: 0,
+      renderedSpanCount: 0,
+      failureReasons: []
+    };
+  }
+
   if (!result.issueDetected) {
     clearInlineHighlights(promptNode);
     clearInlineHighlights(responseNode);
+    hideFloatingTooltip();
     return {
       expectedSpanCount: 0,
       renderedSpanCount: 0,
@@ -1221,6 +1137,11 @@ function buildSpanDisplayMessage(result, highlightDiagnostics) {
     0
   );
   const issueDetected = Boolean(result && result.issueDetected);
+  const spansEnabled = !(result && result.spansEnabled === false);
+
+  if (!spansEnabled) {
+    return "";
+  }
 
   if (issueDetected && evidenceSpanCount === 0) {
     return "No inline evidence spans were returned for this analysis.";
@@ -1353,13 +1274,12 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
 }
 
 async function maybeAnalyzeLatestTurn() {
-  const payload = readLatestConversationTurn();
-  if (!payload) {
+  if (isGenerationInProgress()) {
     return;
   }
 
-  if (!isLatestAssistantTurnReady(payload)) {
-    scheduleAnalysis("awaiting-complete-response");
+  const payload = readLatestConversationTurn();
+  if (!payload) {
     return;
   }
 
