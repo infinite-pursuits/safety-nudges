@@ -929,57 +929,72 @@ function wrapHighlightRange(rootNode, spec) {
     };
   }
 
-  if (startEntry.startNode !== endEntry.endNode) {
-    return {
-      ok: false,
-      reason: "cross-node-span-not-supported"
-    };
-  }
-
-  const textNode = startEntry.startNode;
-  if (!(textNode instanceof Text)) {
-    return {
-      ok: false,
-      reason: "span-boundary-missing"
-    };
-  }
-
-  const wrapper = document.createElement("span");
-  wrapper.className = "safety-nudges-inline-highlight";
-  wrapper.dataset.severity = spec.severity;
-  wrapper.dataset.comment = spec.comment;
-  wrapper.setAttribute("role", "note");
-  wrapper.setAttribute("tabindex", "0");
-  if (spec.comment) {
-    wrapper.setAttribute("aria-label", spec.comment);
-  }
-
   try {
-    const nodeText = textNode.textContent || "";
-    const beforeText = nodeText.slice(0, startEntry.startOffset);
-    const selectedText = nodeText.slice(startEntry.startOffset, endEntry.endOffset);
-    const afterText = nodeText.slice(endEntry.endOffset);
-    const parent = textNode.parentNode;
+    const coveredChars = chars.slice(spec.startChar, spec.endChar);
+    const segments = [];
 
-    if (!parent || !selectedText) {
+    for (const entry of coveredChars) {
+      const textNode = entry.startNode;
+      if (!(textNode instanceof Text)) {
+        continue;
+      }
+
+      const previousSegment = segments.at(-1);
+      if (previousSegment && previousSegment.textNode === textNode && previousSegment.endOffset === entry.startOffset) {
+        previousSegment.endOffset = entry.endOffset;
+      } else {
+        segments.push({
+          textNode,
+          startOffset: entry.startOffset,
+          endOffset: entry.endOffset
+        });
+      }
+    }
+
+    if (segments.length === 0) {
       return {
         ok: false,
         reason: "span-boundary-missing"
       };
     }
 
-    const fragment = document.createDocumentFragment();
-    if (beforeText) {
-      fragment.appendChild(document.createTextNode(beforeText));
-    }
-    wrapper.textContent = selectedText;
-    fragment.appendChild(wrapper);
-    if (afterText) {
-      fragment.appendChild(document.createTextNode(afterText));
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+      const segment = segments[index];
+      const textNode = segment.textNode;
+      const nodeText = textNode.textContent || "";
+      const beforeText = nodeText.slice(0, segment.startOffset);
+      const selectedText = nodeText.slice(segment.startOffset, segment.endOffset);
+      const afterText = nodeText.slice(segment.endOffset);
+      const parent = textNode.parentNode;
+
+      if (!parent || !selectedText) {
+        continue;
+      }
+
+      const wrapper = document.createElement("span");
+      wrapper.className = "safety-nudges-inline-highlight";
+      wrapper.dataset.severity = spec.severity;
+      wrapper.dataset.comment = spec.comment;
+      wrapper.setAttribute("role", "note");
+      wrapper.setAttribute("tabindex", "0");
+      if (spec.comment) {
+        wrapper.setAttribute("aria-label", spec.comment);
+      }
+
+      const fragment = document.createDocumentFragment();
+      if (beforeText) {
+        fragment.appendChild(document.createTextNode(beforeText));
+      }
+      wrapper.textContent = selectedText;
+      fragment.appendChild(wrapper);
+      if (afterText) {
+        fragment.appendChild(document.createTextNode(afterText));
+      }
+
+      parent.insertBefore(fragment, textNode);
+      parent.removeChild(textNode);
     }
 
-    parent.insertBefore(fragment, textNode);
-    parent.removeChild(textNode);
     return {
       ok: true,
       reason: null
