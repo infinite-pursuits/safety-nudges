@@ -81,15 +81,34 @@ function getLastTurnNode(role) {
   return nodes.at(-1) || null;
 }
 
+function unwrapCloneNode(node) {
+  const parent = node.parentNode;
+  if (!parent) {
+    return;
+  }
+
+  while (node.firstChild) {
+    parent.insertBefore(node.firstChild, node);
+  }
+  parent.removeChild(node);
+}
+
 function getNodeText(node) {
   if (!node) {
     return "";
   }
 
   const clone = node.cloneNode(true);
-  const injectedUi = Array.from(clone.querySelectorAll(".safety-nudges-response-anchor"));
+  const injectedUi = Array.from(
+    clone.querySelectorAll(".safety-nudges-response-anchor, .safety-nudges-inline-tooltip")
+  );
   for (const injectedNode of injectedUi) {
     injectedNode.remove();
+  }
+
+  const inlineHighlights = Array.from(clone.querySelectorAll(".safety-nudges-inline-highlight"));
+  for (const highlight of inlineHighlights) {
+    unwrapCloneNode(highlight);
   }
 
   return clone.innerText.replace(/\s+/g, " ").trim();
