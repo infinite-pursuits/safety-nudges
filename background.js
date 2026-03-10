@@ -9,7 +9,7 @@ const DEFAULT_API_CONFIG = {
   provider: "openai",
   endpoint: "http://127.0.0.1:8787/analyze",
   ollamaEndpoint: "http://127.0.0.1:11434/api/chat",
-  enabled: false,
+  enabled: true,
   identifySpans: true,
   openAiApiKey: "",
   openAiModel: "gpt-5-mini",
