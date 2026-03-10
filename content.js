@@ -929,9 +929,20 @@ function wrapHighlightRange(rootNode, spec) {
     };
   }
 
-  const range = document.createRange();
-  range.setStart(startEntry.startNode, startEntry.startOffset);
-  range.setEnd(endEntry.endNode, endEntry.endOffset);
+  if (startEntry.startNode !== endEntry.endNode) {
+    return {
+      ok: false,
+      reason: "cross-node-span-not-supported"
+    };
+  }
+
+  const textNode = startEntry.startNode;
+  if (!(textNode instanceof Text)) {
+    return {
+      ok: false,
+      reason: "span-boundary-missing"
+    };
+  }
 
   const wrapper = document.createElement("span");
   wrapper.className = "safety-nudges-inline-highlight";
@@ -944,9 +955,31 @@ function wrapHighlightRange(rootNode, spec) {
   }
 
   try {
-    const fragment = range.extractContents();
-    wrapper.appendChild(fragment);
-    range.insertNode(wrapper);
+    const nodeText = textNode.textContent || "";
+    const beforeText = nodeText.slice(0, startEntry.startOffset);
+    const selectedText = nodeText.slice(startEntry.startOffset, endEntry.endOffset);
+    const afterText = nodeText.slice(endEntry.endOffset);
+    const parent = textNode.parentNode;
+
+    if (!parent || !selectedText) {
+      return {
+        ok: false,
+        reason: "span-boundary-missing"
+      };
+    }
+
+    const fragment = document.createDocumentFragment();
+    if (beforeText) {
+      fragment.appendChild(document.createTextNode(beforeText));
+    }
+    wrapper.textContent = selectedText;
+    fragment.appendChild(wrapper);
+    if (afterText) {
+      fragment.appendChild(document.createTextNode(afterText));
+    }
+
+    parent.insertBefore(fragment, textNode);
+    parent.removeChild(textNode);
     return {
       ok: true,
       reason: null
