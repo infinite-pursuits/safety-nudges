@@ -309,6 +309,13 @@
   border-top: 1px solid rgba(148, 163, 184, 0.2);
 }
 
+.safety-nudges-feedback-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .safety-nudges-feedback-label,
 .safety-nudges-feedback-consent,
 .safety-nudges-feedback-status,
@@ -327,8 +334,11 @@
 .safety-nudges-feedback-actions {
   display: flex;
   gap: 8px;
-  margin-top: 8px;
   flex-wrap: wrap;
+}
+
+.safety-nudges-feedback-actions {
+  margin-top: 8px;
 }
 
 .safety-nudges-feedback-option,
@@ -344,6 +354,13 @@
   font-weight: 600;
   line-height: 1.2;
   padding: 7px 10px;
+}
+
+.safety-nudges-feedback-option {
+  min-width: 38px;
+  justify-content: center;
+  padding: 7px 0;
+  font-size: 16px;
 }
 
 .safety-nudges-feedback-option[data-selected="true"] {

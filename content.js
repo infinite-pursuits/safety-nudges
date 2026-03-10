@@ -858,12 +858,14 @@ function ensureResponseAnchor(responseNode, fingerprint) {
       '<p class="safety-nudges-panel-summary">Waiting for analysis...</p>',
       '<ul class="safety-nudges-issue-list"></ul>',
       '<div class="safety-nudges-feedback-section">',
-      '<p class="safety-nudges-feedback-label">Was this judgment helpful?</p>',
-      '<div class="safety-nudges-feedback-options" role="group" aria-label="Judgment feedback">',
-      '<button type="button" class="safety-nudges-feedback-option" data-feedback-value="helpful" aria-pressed="false">Thumbs up</button>',
-      '<button type="button" class="safety-nudges-feedback-option" data-feedback-value="unhelpful" aria-pressed="false">Thumbs down</button>',
+      '<div class="safety-nudges-feedback-row">',
+      '<p class="safety-nudges-feedback-label">Was this nudge helpful?</p>',
+      '<div class="safety-nudges-feedback-options" role="group" aria-label="Nudge feedback">',
+      '<button type="button" class="safety-nudges-feedback-option" data-feedback-value="helpful" aria-pressed="false" aria-label="Helpful">👍</button>',
+      '<button type="button" class="safety-nudges-feedback-option" data-feedback-value="unhelpful" aria-pressed="false" aria-label="Unhelpful">👎</button>',
       "</div>",
-      `<label class="safety-nudges-feedback-comment" hidden><span>Optional comment</span><textarea class="safety-nudges-feedback-textarea" rows="3" maxlength="${FEEDBACK_COMMENT_MAX_CHARS}" placeholder="Tell us what was right or wrong about this judgment."></textarea></label>`,
+      "</div>",
+      `<label class="safety-nudges-feedback-comment" hidden><span>Optional comment</span><textarea class="safety-nudges-feedback-textarea" rows="3" maxlength="${FEEDBACK_COMMENT_MAX_CHARS}" placeholder="Tell us what was right or wrong about this nudge."></textarea></label>`,
       '<p class="safety-nudges-feedback-consent" hidden>Submitting feedback shares the current chat history with the Safety Nudges research team for evaluation, product improvement, and model training.</p>',
       '<p class="safety-nudges-feedback-status" aria-live="polite"></p>',
       '<div class="safety-nudges-feedback-actions" hidden>',
@@ -965,7 +967,7 @@ function ensureResponseAnchor(responseNode, fingerprint) {
 
         feedbackState.stage = "submitted";
         feedbackState.status = "idle";
-        feedbackState.message = "Thanks. Your feedback was recorded for follow-up integration work.";
+        feedbackState.message = "Your feedback was recorded.";
         feedbackState.submittedAt = new Date().toISOString();
         feedbackState.receiptId = submission.receiptId || "";
         feedbackState.lastEvent = submission.eventName || FEEDBACK_SUBMIT_EVENT;
