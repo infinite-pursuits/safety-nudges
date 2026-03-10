@@ -378,6 +378,26 @@ function createTestPayload() {
   };
 }
 
+function summarizeFeedbackPayload(payload) {
+  const issues = Array.isArray(payload && payload.judgment && payload.judgment.issues) ? payload.judgment.issues : [];
+  const transcript = Array.isArray(payload && payload.chat_history) ? payload.chat_history : [];
+
+  return {
+    schemaVersion: payload && payload.schema_version ? payload.schema_version : null,
+    eventName: payload && payload.event_name ? payload.event_name : null,
+    conversationId: payload && payload.conversation_id ? payload.conversation_id : null,
+    turnId: payload && payload.turn_id ? payload.turn_id : null,
+    rating: payload && payload.rating ? payload.rating : null,
+    commentChars: payload && typeof payload.comment === "string" ? payload.comment.length : 0,
+    issueDetected: Boolean(payload && payload.judgment && payload.judgment.issue_detected),
+    issueCount: issues.length,
+    modelId: payload && payload.model_id ? payload.model_id : null,
+    chatHistoryTurns: transcript.length,
+    consentShareChatHistory: Boolean(payload && payload.consent && payload.consent.share_chat_history),
+    mockSubmission: Boolean(payload && payload.flags && payload.flags.mock_submission)
+  };
+}
+
 function buildOllamaTagsUrl(endpoint) {
   const fallback = "http://127.0.0.1:11434/api/tags";
 
@@ -1188,6 +1208,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
       });
     return true;
+  }
+
+  if (message.type === "SAFETY_NUDGES_SUBMIT_JUDGMENT_FEEDBACK") {
+    const payload = message.payload || {};
+    const receiptId = `feedback-${Date.now()}`;
+    logEvent("info", "Judgment feedback captured by mock transport", {
+      receiptId,
+      ...summarizeFeedbackPayload(payload)
+    });
+    sendResponse({
+      ok: true,
+      eventName: payload.event_name || "judgment_feedback_submitted",
+      receiptId
+    });
+    return false;
   }
 
   if (message.type === "SAFETY_NUDGES_LOG_CLIENT_EVENT") {

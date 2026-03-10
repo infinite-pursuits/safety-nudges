@@ -4,6 +4,11 @@ const ANALYSIS_RESPONSE_TIMEOUT_MS = 30000;
 const ANALYSIS_ATTEMPT_TIMEOUT_MS = 4000;
 const MAX_ANALYSIS_ATTEMPTS = 8;
 const STALE_ANALYSIS_RETRY_MS = 5000;
+const FEEDBACK_COMMENT_MAX_CHARS = 280;
+const FEEDBACK_SCHEMA_VERSION = "1.0.0";
+const FEEDBACK_DISCLOSURE_VERSION = "2026-03-10";
+const FEEDBACK_SUBMIT_EVENT = "judgment_feedback_submitted";
+const FEEDBACK_FAILURE_EVENT = "judgment_feedback_failed";
 
 const state = {
   observer: null,
@@ -12,6 +17,8 @@ const state = {
   nextTooltipId: 0,
   floatingTooltipNode: null,
   analysesByFingerprint: new Map(),
+  feedbackByFingerprint: new Map(),
+  payloadByFingerprint: new Map(),
   outsideClickInstalled: false,
   viewportListenersInstalled: false,
   extensionRecoveryAttempted: false
@@ -163,6 +170,59 @@ function buildSerializablePayload(payload) {
   };
 }
 
+function readConversationTranscript() {
+  const turnNodes = Array.from(document.querySelectorAll("[data-message-author-role]"));
+  const transcript = [];
+
+  for (const node of turnNodes) {
+    const role = node.getAttribute("data-message-author-role");
+    if (role !== "user" && role !== "assistant") {
+      continue;
+    }
+
+    const content = getNodeText(node);
+    if (!content) {
+      continue;
+    }
+
+    transcript.push({
+      role,
+      content
+    });
+  }
+
+  return transcript;
+}
+
+function getInitialFeedbackState() {
+  return {
+    stage: "idle",
+    selected: "",
+    comment: "",
+    status: "idle",
+    message: "",
+    submittedAt: "",
+    receiptId: "",
+    lastEvent: ""
+  };
+}
+
+function getFeedbackState(fingerprint) {
+  if (!state.feedbackByFingerprint.has(fingerprint)) {
+    state.feedbackByFingerprint.set(fingerprint, getInitialFeedbackState());
+  }
+
+  return state.feedbackByFingerprint.get(fingerprint);
+}
+
+function buildFeedbackSummary(feedbackState) {
+  if (!feedbackState || feedbackState.stage !== "submitted") {
+    return "";
+  }
+
+  return feedbackState.selected === "helpful" ? "Marked helpful." : "Marked unhelpful.";
+}
+
 function isRecoverableExtensionError(message) {
   if (!message || typeof message !== "string") {
     return false;
@@ -214,6 +274,107 @@ function emitClientLog(message, details = null, level = "info") {
       resolve(false);
     }
   });
+}
+
+function sendRuntimeMessage(message) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        resolve(response || null);
+      });
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error("Unknown extension messaging error"));
+    }
+  });
+}
+
+function buildFeedbackPayload(payload, fingerprint, analysisState, feedbackState) {
+  const result = analysisState && analysisState.result ? analysisState.result : { issueDetected: false, issues: [] };
+  const issues = Array.isArray(result.issues) ? result.issues : [];
+
+  return {
+    schema_version: FEEDBACK_SCHEMA_VERSION,
+    event_name: FEEDBACK_SUBMIT_EVENT,
+    source: "chrome_extension",
+    submitted_at: new Date().toISOString(),
+    page_url: payload.pageUrl,
+    conversation_id: payload.conversationId,
+    turn_id: fingerprint,
+    model_id: result.source || null,
+    rating: feedbackState.selected,
+    comment: feedbackState.comment.trim(),
+    consent: {
+      disclosure_version: FEEDBACK_DISCLOSURE_VERSION,
+      share_chat_history: true,
+      purposes: ["research", "training", "product_improvement"]
+    },
+    judgment: {
+      issue_detected: Boolean(result.issueDetected),
+      summary: result.summary || "",
+      severity: inferSeverityFromResult(result),
+      issue_count: issues.length,
+      issues: issues.map((issue) => ({
+        id: issue && issue.id ? issue.id : null,
+        label: issue && issue.label ? issue.label : "other",
+        severity: issue && issue.severity ? issue.severity : "low",
+        actor: issue && issue.actor ? issue.actor : "assistant"
+      }))
+    },
+    latest_turn: {
+      prompt: payload.prompt,
+      response: payload.response
+    },
+    chat_history: readConversationTranscript(),
+    flags: {
+      mock_submission: true,
+      anti_spam_rule: "one_submission_per_judgment",
+      comment_max_chars: FEEDBACK_COMMENT_MAX_CHARS
+    }
+  };
+}
+
+async function submitJudgmentFeedback(payload, fingerprint, analysisState, feedbackState) {
+  if (navigator.onLine === false) {
+    return {
+      ok: false,
+      eventName: FEEDBACK_FAILURE_EVENT,
+      error: "You appear to be offline. Reconnect before submitting feedback."
+    };
+  }
+
+  const feedbackPayload = buildFeedbackPayload(payload, fingerprint, analysisState, feedbackState);
+  try {
+    const response = await sendRuntimeMessage({
+      type: "SAFETY_NUDGES_SUBMIT_JUDGMENT_FEEDBACK",
+      payload: feedbackPayload
+    });
+
+    if (!response || !response.ok) {
+      return {
+        ok: false,
+        eventName: FEEDBACK_FAILURE_EVENT,
+        error: (response && response.error) || "Feedback could not be submitted."
+      };
+    }
+
+    return {
+      ok: true,
+      eventName: response.eventName || FEEDBACK_SUBMIT_EVENT,
+      receiptId: response.receiptId || ""
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown feedback submission error";
+    return {
+      ok: false,
+      eventName: FEEDBACK_FAILURE_EVENT,
+      error: errorMessage
+    };
+  }
 }
 
 function sendAnalysisMessageOnce(payload, timeoutMs) {
@@ -696,6 +857,20 @@ function ensureResponseAnchor(responseNode, fingerprint) {
       "</div>",
       '<p class="safety-nudges-panel-summary">Waiting for analysis...</p>',
       '<ul class="safety-nudges-issue-list"></ul>',
+      '<div class="safety-nudges-feedback-section">',
+      '<p class="safety-nudges-feedback-label">Was this judgment helpful?</p>',
+      '<div class="safety-nudges-feedback-options" role="group" aria-label="Judgment feedback">',
+      '<button type="button" class="safety-nudges-feedback-option" data-feedback-value="helpful" aria-pressed="false">Thumbs up</button>',
+      '<button type="button" class="safety-nudges-feedback-option" data-feedback-value="unhelpful" aria-pressed="false">Thumbs down</button>',
+      "</div>",
+      `<label class="safety-nudges-feedback-comment" hidden><span>Optional comment</span><textarea class="safety-nudges-feedback-textarea" rows="3" maxlength="${FEEDBACK_COMMENT_MAX_CHARS}" placeholder="Tell us what was right or wrong about this judgment."></textarea></label>`,
+      '<p class="safety-nudges-feedback-consent" hidden>Submitting feedback shares the current chat history with the Safety Nudges research team for evaluation, product improvement, and model training.</p>',
+      '<p class="safety-nudges-feedback-status" aria-live="polite"></p>',
+      '<div class="safety-nudges-feedback-actions" hidden>',
+      '<button type="button" class="safety-nudges-feedback-submit">Submit feedback</button>',
+      '<button type="button" class="safety-nudges-feedback-cancel">Cancel</button>',
+      "</div>",
+      "</div>",
       "</div>"
     ].join("");
 
@@ -714,6 +889,87 @@ function ensureResponseAnchor(responseNode, fingerprint) {
         event.preventDefault();
         event.stopPropagation();
         closeAllResponsePanels();
+      });
+    }
+
+    const feedbackOptions = Array.from(anchor.querySelectorAll(".safety-nudges-feedback-option"));
+    for (const option of feedbackOptions) {
+      option.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const nextValue = option.dataset.feedbackValue;
+        const feedbackState = getFeedbackState(fingerprint);
+        if (feedbackState.stage === "submitted" || !nextValue) {
+          return;
+        }
+
+        feedbackState.selected = nextValue;
+        feedbackState.stage = feedbackState.comment.trim() ? "comment_edit" : "selected";
+        feedbackState.status = "idle";
+        feedbackState.message = "";
+        renderFeedbackSection(anchor, feedbackState);
+      });
+    }
+
+    const textarea = anchor.querySelector(".safety-nudges-feedback-textarea");
+    if (textarea) {
+      textarea.addEventListener("input", () => {
+        const feedbackState = getFeedbackState(fingerprint);
+        if (feedbackState.stage === "submitted") {
+          return;
+        }
+
+        feedbackState.comment = textarea.value.slice(0, FEEDBACK_COMMENT_MAX_CHARS);
+        feedbackState.stage = feedbackState.comment.trim() ? "comment_edit" : feedbackState.selected ? "selected" : "idle";
+        feedbackState.status = "idle";
+        feedbackState.message = "";
+        renderFeedbackSection(anchor, feedbackState);
+      });
+    }
+
+    const cancelButton = anchor.querySelector(".safety-nudges-feedback-cancel");
+    if (cancelButton) {
+      cancelButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        state.feedbackByFingerprint.set(fingerprint, getInitialFeedbackState());
+        renderFeedbackSection(anchor, getFeedbackState(fingerprint));
+      });
+    }
+
+    const submitButton = anchor.querySelector(".safety-nudges-feedback-submit");
+    if (submitButton) {
+      submitButton.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const payloadForSubmit = state.payloadByFingerprint.get(fingerprint);
+        const analysisForSubmit = state.analysesByFingerprint.get(fingerprint);
+        const feedbackState = getFeedbackState(fingerprint);
+        if (!payloadForSubmit || !analysisForSubmit || !feedbackState.selected || feedbackState.stage === "submitted") {
+          return;
+        }
+
+        feedbackState.status = "submitting";
+        feedbackState.message = "Submitting feedback...";
+        renderFeedbackSection(anchor, feedbackState);
+
+        const submission = await submitJudgmentFeedback(payloadForSubmit, fingerprint, analysisForSubmit, feedbackState);
+        if (!submission.ok) {
+          feedbackState.status = "error";
+          feedbackState.message = submission.error || "Feedback could not be submitted.";
+          feedbackState.lastEvent = submission.eventName || FEEDBACK_FAILURE_EVENT;
+          renderFeedbackSection(anchor, feedbackState);
+          return;
+        }
+
+        feedbackState.stage = "submitted";
+        feedbackState.status = "idle";
+        feedbackState.message = "Thanks. Your feedback was recorded for follow-up integration work.";
+        feedbackState.submittedAt = new Date().toISOString();
+        feedbackState.receiptId = submission.receiptId || "";
+        feedbackState.lastEvent = submission.eventName || FEEDBACK_SUBMIT_EVENT;
+        renderFeedbackSection(anchor, feedbackState);
       });
     }
 
@@ -1222,11 +1478,77 @@ function renderIssueList(listNode, result) {
   }
 }
 
+function renderFeedbackSection(anchor, feedbackState, analysisState = null) {
+  const options = Array.from(anchor.querySelectorAll(".safety-nudges-feedback-option"));
+  const commentWrap = anchor.querySelector(".safety-nudges-feedback-comment");
+  const textarea = anchor.querySelector(".safety-nudges-feedback-textarea");
+  const consent = anchor.querySelector(".safety-nudges-feedback-consent");
+  const status = anchor.querySelector(".safety-nudges-feedback-status");
+  const actions = anchor.querySelector(".safety-nudges-feedback-actions");
+  const submitButton = anchor.querySelector(".safety-nudges-feedback-submit");
+  const cancelButton = anchor.querySelector(".safety-nudges-feedback-cancel");
+  const selectedValue = feedbackState && feedbackState.selected ? feedbackState.selected : "";
+  const isSubmitted = feedbackState && feedbackState.stage === "submitted";
+  const isSubmitting = feedbackState && feedbackState.status === "submitting";
+  const canShowForm = Boolean(selectedValue) && !isSubmitted;
+  const analysisComplete = !analysisState || analysisState.status === "complete";
+
+  for (const option of options) {
+    const isActive = option.dataset.feedbackValue === selectedValue;
+    option.dataset.selected = isActive ? "true" : "false";
+    option.setAttribute("aria-pressed", isActive ? "true" : "false");
+    option.disabled = isSubmitted || isSubmitting || !analysisComplete;
+  }
+
+  if (commentWrap) {
+    commentWrap.hidden = !canShowForm;
+  }
+  if (textarea) {
+    if (textarea.value !== (feedbackState.comment || "")) {
+      textarea.value = feedbackState.comment || "";
+    }
+    textarea.disabled = isSubmitted || isSubmitting || !analysisComplete;
+  }
+  if (consent) {
+    consent.hidden = !canShowForm;
+  }
+  if (actions) {
+    actions.hidden = !canShowForm;
+  }
+  if (submitButton) {
+    submitButton.disabled = !selectedValue || isSubmitted || isSubmitting || !analysisComplete;
+    submitButton.textContent = isSubmitting ? "Submitting..." : "Submit feedback";
+  }
+  if (cancelButton) {
+    cancelButton.disabled = isSubmitting;
+  }
+
+  if (!status) {
+    return;
+  }
+
+  status.dataset.state = feedbackState.status || "idle";
+  if (!analysisComplete) {
+    status.textContent = "Feedback becomes available after the judgment finishes loading.";
+    return;
+  }
+  if (feedbackState.message) {
+    status.textContent = feedbackState.message;
+    return;
+  }
+  if (isSubmitted) {
+    status.textContent = buildFeedbackSummary(feedbackState);
+    return;
+  }
+  status.textContent = "";
+}
+
 function renderResponseIndicator(payload, fingerprint, analysisState) {
   const responseNode = payload.responseNode;
   if (!responseNode || !responseNode.isConnected) {
     return;
   }
+  state.payloadByFingerprint.set(fingerprint, buildSerializablePayload(payload));
 
   const anchor = ensureResponseAnchor(responseNode, fingerprint);
   const chip = anchor.querySelector(".safety-nudges-response-chip");
@@ -1255,6 +1577,7 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
     summary.textContent = "Safety Nudges is reviewing this response now.";
     issueList.replaceChildren();
     spinner.hidden = false;
+    renderFeedbackSection(anchor, getFeedbackState(fingerprint), analysisState);
     return;
   }
 
@@ -1264,12 +1587,14 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
     chipText.textContent = "Analysis failed";
     summary.textContent = analysisState.message || "Safety Nudges could not analyze this response.";
     issueList.replaceChildren();
+    renderFeedbackSection(anchor, getFeedbackState(fingerprint), analysisState);
     return;
   }
 
   chipText.textContent = buildCompletionMessage(result);
   summary.textContent = result.summary || buildCompletionMessage(result);
   renderIssueList(issueList, result);
+  renderFeedbackSection(anchor, getFeedbackState(fingerprint), analysisState);
   maybeLogSpanDisplayMessage(payload, result, highlightDiagnostics);
 }
 
