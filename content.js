@@ -674,7 +674,9 @@ function updateInlineTooltipPlacement(highlightNode) {
   const margin = 12;
   const availableAbove = top - (viewportTopLimit + margin) - gap;
   const availableBelow = viewportBottomLimit - bottom - gap - margin;
-  tooltip.dataset.placement = tooltipRect.height > availableAbove && availableBelow > availableAbove ? "below" : "above";
+  const placeBelow = tooltipRect.height > availableAbove && availableBelow > availableAbove;
+  tooltip.dataset.placement = placeBelow ? "below" : "above";
+  tooltip.style.top = `${Math.round(placeBelow ? bottom : top)}px`;
 }
 
 function ensureFloatingTooltip() {
