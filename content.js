@@ -550,6 +550,32 @@ function getViewportBottomLimit(anchorRect) {
 
 function getViewportTopLimit(anchorRect) {
   const fallbackTop = 0;
+  const topCandidates = Array.from(document.querySelectorAll("body *")).filter((element) => {
+    if (shouldIgnoreViewportBlocker(element)) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+    if (style.position !== "fixed" && style.position !== "sticky") {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (rect.height < 40 || rect.bottom <= 0 || rect.top > 96) {
+      return false;
+    }
+
+    if (rect.right < 0 || rect.left > window.innerWidth) {
+      return false;
+    }
+
+    return true;
+  });
+  const directTopLimit = topCandidates.reduce((maxBottom, element) => {
+    const rect = element.getBoundingClientRect();
+    return Math.max(maxBottom, rect.bottom);
+  }, fallbackTop);
+
   const sampleXs = Array.from(
     new Set([
       Math.max(16, Math.min(window.innerWidth - 16, anchorRect.right - 16)),
@@ -584,7 +610,7 @@ function getViewportTopLimit(anchorRect) {
     }
   }
 
-  return obstructionBottom;
+  return Math.max(directTopLimit, obstructionBottom);
 }
 
 function updateResponsePanelPlacement(anchor) {
