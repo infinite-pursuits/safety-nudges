@@ -626,9 +626,11 @@ function updateResponsePanelPlacement(anchor) {
     return;
   }
 
-  const hiddenAnchorOffset = Math.max(0, anchorRect.top - safeBottom);
-  panel.style.top = "auto";
-  panel.style.bottom = `${anchor.offsetHeight + gap + hiddenAnchorOffset}px`;
+  const cappedPanelHeight = Math.min(panelRect.height, maxHeight);
+  const minTopOffset = safeTop - anchorRect.top;
+  const preferredTopOffset = -(cappedPanelHeight + gap);
+  panel.style.top = `${Math.round(Math.max(minTopOffset, preferredTopOffset))}px`;
+  panel.style.bottom = "auto";
 }
 
 function updateInlineTooltipPlacement(highlightNode) {
