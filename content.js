@@ -28,6 +28,30 @@ function isChatGptHost() {
   return window.location.hostname === "chatgpt.com" || window.location.hostname === "chat.openai.com";
 }
 
+function isLocalFixtureHost() {
+  return window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
+}
+
+function isFixturePageEnabled() {
+  if (!isLocalFixtureHost()) {
+    return false;
+  }
+
+  if (!window.location.pathname.startsWith("/fixtures/")) {
+    return false;
+  }
+
+  const root = document.documentElement;
+  return Boolean(
+    (root && root.dataset && root.dataset.safetyNudgesFixture === "true") ||
+      document.querySelector('meta[name="safety-nudges-fixture"][content="true"]')
+  );
+}
+
+function isSupportedSurface() {
+  return isChatGptHost() || isFixturePageEnabled();
+}
+
 function formatLabel(value) {
   if (!value || typeof value !== "string") {
     return "Issue";
@@ -1832,7 +1856,7 @@ function installViewportListeners() {
 }
 
 function installShell() {
-  if (!isChatGptHost()) {
+  if (!isSupportedSurface()) {
     return;
   }
 

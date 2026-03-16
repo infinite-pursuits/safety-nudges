@@ -46,3 +46,7 @@ Failure and anti-spam behavior:
 - Submit stays disabled while a request is in flight so repeated clicks do not duplicate events.
 
 Load this directory as an unpacked extension in Chrome to continue Step 2 development.
+
+Automated browser harness:
+- For deterministic end-to-end extension validation, use the local fixture harness documented in `docs/step2/extension_automation_harness.md`.
+- The harness launches the real unpacked extension in Chrome, configures the popup automatically, serves ChatGPT-like fixtures on `127.0.0.1`, and drives assertions for panels, highlights, tooltips, invalid spans, and error states.

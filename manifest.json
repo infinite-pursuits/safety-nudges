@@ -24,7 +24,9 @@
     {
       "matches": [
         "https://chatgpt.com/*",
-        "https://chat.openai.com/*"
+        "https://chat.openai.com/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*"
       ],
       "js": [
         "content.js"
