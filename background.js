@@ -462,7 +462,7 @@ function buildSupabaseFeedbackRow(payload, config) {
 
 async function submitFeedbackToSupabase(payload) {
   const config = await getStoredApiConfig();
-  const endpoint = `${SUPABASE_URL}/rest/v1/feedback_judgments?on_conflict=conversation_id,turn_id`;
+  const endpoint = `${SUPABASE_URL}/rest/v1/feedback_judgments`;
   const row = buildSupabaseFeedbackRow(payload, config);
   const response = await fetchWithTimeout(
     endpoint,
@@ -472,7 +472,7 @@ async function submitFeedbackToSupabase(payload) {
         apikey: SUPABASE_PUBLISHABLE_KEY,
         Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
         "Content-Type": "application/json",
-        Prefer: "resolution=ignore-duplicates,return=representation"
+        Prefer: "resolution=ignore-duplicates,return=minimal"
       },
       body: JSON.stringify(row)
     },
@@ -491,19 +491,30 @@ async function submitFeedbackToSupabase(payload) {
     }
   }
 
+  if (response.status === 409) {
+    logEvent("info", "Judgment feedback already exists in Supabase", {
+      endpoint,
+      receiptId: `${row.conversation_id || "unknown-conversation"}::${row.turn_id || "unknown-turn"}`,
+      ...summarizeFeedbackPayload(payload)
+    });
+    return {
+      ok: true,
+      eventName: (payload && payload.event_name) || "judgment_feedback_submitted",
+      receiptId: `${row.conversation_id || "unknown-conversation"}::${row.turn_id || "unknown-turn"}`
+    };
+  }
+
   if (!response.ok) {
     const errorMessage = `Supabase feedback insert returned HTTP ${response.status}: ${responseText}`.trim();
     throw new Error(errorMessage);
   }
 
-  const insertedRow = Array.isArray(responseBody) ? responseBody[0] || null : null;
   const receiptId =
     `${row.conversation_id || "unknown-conversation"}::${row.turn_id || "unknown-turn"}`;
 
   logEvent("info", "Judgment feedback stored via Supabase", {
     endpoint,
     receiptId,
-    deduped: !insertedRow,
     ...summarizeFeedbackPayload(payload)
   });
 
