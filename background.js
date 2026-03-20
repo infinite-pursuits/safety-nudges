@@ -15,6 +15,8 @@ const DEFAULT_API_CONFIG = {
   openAiModel: "gpt-5-mini",
   ollamaModel: "llama3.1:8b"
 };
+const SUPABASE_URL = "https://bjokhkmomdogymmmnpdo.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_KdngS39ZCxvJ854R0zy3xA_0LKy8nj5";
 
 const MAX_ACTIVITY_LOGS = 40;
 const NETWORK_TIMEOUT_MS = 30000;
@@ -395,6 +397,120 @@ function summarizeFeedbackPayload(payload) {
     chatHistoryTurns: transcript.length,
     consentShareChatHistory: Boolean(payload && payload.consent && payload.consent.share_chat_history),
     mockSubmission: Boolean(payload && payload.flags && payload.flags.mock_submission)
+  };
+}
+
+function isLocalUrl(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function inferFeedbackIsTest(config, payload) {
+  if (payload && payload.flags && payload.flags.is_test === true) {
+    return true;
+  }
+
+  if (payload && typeof payload.page_url === "string" && payload.page_url.startsWith("http://127.0.0.1")) {
+    return true;
+  }
+
+  if (payload && typeof payload.page_url === "string" && payload.page_url.startsWith("http://localhost")) {
+    return true;
+  }
+
+  if (config && config.provider === "local" && isLocalUrl(config.endpoint)) {
+    return true;
+  }
+
+  return false;
+}
+
+function buildSupabaseFeedbackRow(payload, config) {
+  const consent = payload && payload.consent && typeof payload.consent === "object" ? payload.consent : {};
+  const judgment = payload && payload.judgment && typeof payload.judgment === "object" ? payload.judgment : {};
+  return {
+    submitted_at: payload && payload.submitted_at ? payload.submitted_at : nowIso(),
+    page_url: payload && payload.page_url ? payload.page_url : null,
+    conversation_id: payload && payload.conversation_id ? payload.conversation_id : null,
+    turn_id: payload && payload.turn_id ? payload.turn_id : null,
+    model_id: payload && payload.model_id ? payload.model_id : null,
+    rating: payload && payload.rating ? payload.rating : null,
+    comment: payload && typeof payload.comment === "string" ? payload.comment : "",
+    disclosure_version: consent && consent.disclosure_version ? consent.disclosure_version : null,
+    share_chat_history: Boolean(consent && consent.share_chat_history),
+    consent_purposes: Array.isArray(consent && consent.purposes) ? consent.purposes : [],
+    issue_detected: Boolean(judgment && judgment.issue_detected),
+    judgment_summary: judgment && judgment.summary ? judgment.summary : "",
+    judgment_severity: judgment && judgment.severity ? judgment.severity : "none",
+    issue_count: Array.isArray(judgment && judgment.issues) ? judgment.issues.length : 0,
+    judgment_issues: Array.isArray(judgment && judgment.issues) ? judgment.issues : [],
+    latest_turn: payload && payload.latest_turn && typeof payload.latest_turn === "object" ? payload.latest_turn : {},
+    chat_history: Array.isArray(payload && payload.chat_history) ? payload.chat_history : [],
+    flags: payload && payload.flags && typeof payload.flags === "object" ? payload.flags : {},
+    is_test: inferFeedbackIsTest(config, payload),
+    raw_payload: payload && typeof payload === "object" ? payload : {}
+  };
+}
+
+async function submitFeedbackToSupabase(payload) {
+  const config = await getStoredApiConfig();
+  const endpoint = `${SUPABASE_URL}/rest/v1/feedback_judgments?on_conflict=conversation_id,turn_id`;
+  const row = buildSupabaseFeedbackRow(payload, config);
+  const response = await fetchWithTimeout(
+    endpoint,
+    {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=ignore-duplicates,return=representation"
+      },
+      body: JSON.stringify(row)
+    },
+    NETWORK_TIMEOUT_MS
+  );
+
+  let responseBody = [];
+  let responseText = "";
+  try {
+    responseBody = await response.json();
+  } catch (_error) {
+    try {
+      responseText = await response.text();
+    } catch (_nestedError) {
+      responseText = "";
+    }
+  }
+
+  if (!response.ok) {
+    const errorMessage = `Supabase feedback insert returned HTTP ${response.status}: ${responseText}`.trim();
+    throw new Error(errorMessage);
+  }
+
+  const insertedRow = Array.isArray(responseBody) ? responseBody[0] || null : null;
+  const receiptId =
+    `${row.conversation_id || "unknown-conversation"}::${row.turn_id || "unknown-turn"}`;
+
+  logEvent("info", "Judgment feedback stored via Supabase", {
+    endpoint,
+    receiptId,
+    deduped: !insertedRow,
+    ...summarizeFeedbackPayload(payload)
+  });
+
+  return {
+    ok: true,
+    eventName: (payload && payload.event_name) || "judgment_feedback_submitted",
+    receiptId
   };
 }
 
@@ -1211,18 +1327,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "SAFETY_NUDGES_SUBMIT_JUDGMENT_FEEDBACK") {
-    const payload = message.payload || {};
-    const receiptId = `feedback-${Date.now()}`;
-    logEvent("info", "Judgment feedback captured by mock transport", {
-      receiptId,
-      ...summarizeFeedbackPayload(payload)
-    });
-    sendResponse({
-      ok: true,
-      eventName: payload.event_name || "judgment_feedback_submitted",
-      receiptId
-    });
-    return false;
+    void submitFeedbackToSupabase(message.payload || {})
+      .then((result) => {
+        sendResponse(result);
+      })
+      .catch((error) => {
+        logEvent("error", "Judgment feedback submission failed", {
+          error: error instanceof Error ? error.message : "Unknown feedback submission error",
+          ...summarizeFeedbackPayload(message.payload || {})
+        });
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Unknown feedback submission error"
+        });
+      });
+    return true;
   }
 
   if (message.type === "SAFETY_NUDGES_LOG_CLIENT_EVENT") {

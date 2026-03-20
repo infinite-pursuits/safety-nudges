@@ -9,6 +9,7 @@ const FEEDBACK_SCHEMA_VERSION = "1.0.0";
 const FEEDBACK_DISCLOSURE_VERSION = "2026-03-10";
 const FEEDBACK_SUBMIT_EVENT = "judgment_feedback_submitted";
 const FEEDBACK_FAILURE_EVENT = "judgment_feedback_failed";
+const ANONYMOUS_CONVERSATION_STORAGE_KEY = "safety_nudges_anonymous_conversation_id";
 
 const state = {
   observer: null,
@@ -143,8 +144,39 @@ function getLastTurnText(role) {
 }
 
 function getConversationId() {
+  const fixtureRoot = document.documentElement;
+  const fixtureConversationId =
+    (fixtureRoot &&
+      fixtureRoot.dataset &&
+      typeof fixtureRoot.dataset.safetyNudgesConversationId === "string" &&
+      fixtureRoot.dataset.safetyNudgesConversationId.trim()) ||
+    (document.querySelector('meta[name="safety-nudges-conversation-id"]') || {}).content ||
+    "";
+  if (fixtureConversationId) {
+    return fixtureConversationId;
+  }
+
   const pathParts = window.location.pathname.split("/").filter(Boolean);
-  return pathParts.at(-1) || null;
+  if (pathParts.length > 0) {
+    return pathParts.at(-1) || null;
+  }
+
+  if (isChatGptHost()) {
+    try {
+      const existingId = window.sessionStorage.getItem(ANONYMOUS_CONVERSATION_STORAGE_KEY);
+      if (existingId && existingId.trim()) {
+        return existingId.trim();
+      }
+
+      const generatedId = `chatgpt-anon-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+      window.sessionStorage.setItem(ANONYMOUS_CONVERSATION_STORAGE_KEY, generatedId);
+      return generatedId;
+    } catch (_error) {
+      return `chatgpt-anon-${Date.now()}`;
+    }
+  }
+
+  return null;
 }
 
 function nowMs() {
@@ -355,7 +387,8 @@ function buildFeedbackPayload(payload, fingerprint, analysisState, feedbackState
     },
     chat_history: readConversationTranscript(),
     flags: {
-      mock_submission: true,
+      mock_submission: false,
+      transport: "supabase_rest_v1",
       anti_spam_rule: "one_submission_per_judgment",
       comment_max_chars: FEEDBACK_COMMENT_MAX_CHARS
     }

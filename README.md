@@ -7,7 +7,7 @@ What is implemented:
 - A background service worker that can call OpenAI directly, call Ollama's local `/api/chat` endpoint, or POST to a custom local analysis endpoint, then normalize Step 1-style results.
 - A content script that watches the ChatGPT conversation DOM, waits for a quiet period after mutations, and extracts the latest user prompt plus assistant response.
 - A small lower-right in-page nudge that stays hidden unless an issue is detected (or debug mode is enabled).
-- A judgments-panel feedback flow with thumbs up/down, an optional short comment, inline consent copy, and a mock transport that records the future submission contract without persisting data yet.
+- A judgments-panel feedback flow with thumbs up/down, an optional short comment, inline consent copy, and direct Supabase persistence for submitted feedback.
 - A popup that lets you store your OpenAI API key locally inside the extension, switch providers, configure an Ollama model, and watch a live activity log.
 
 Testing visibility:
@@ -31,13 +31,18 @@ Running the local bridge:
 
 What is intentionally stubbed:
 - Hardening the ChatGPT DOM selectors beyond the current baseline heuristics.
-- Feedback persistence. `SAFETY_NUDGES_SUBMIT_JUDGMENT_FEEDBACK` currently routes to a background-worker no-op/mock that logs a receipt and payload summary only.
 
 Judgment feedback contract:
 - Event name: `judgment_feedback_submitted`
 - Payload keys: `schema_version`, `source`, `submitted_at`, `page_url`, `conversation_id`, `turn_id`, `model_id`, `rating`, `comment`, `consent`, `judgment`, `latest_turn`, `chat_history`, `flags`
 - Consent contract: `consent.share_chat_history=true` and `consent.purposes=["research","training","product_improvement"]`
 - Judgment metadata for later API wiring: `conversation_id` as chat ID, `turn_id` as the judged-turn fingerprint, `model_id` from the analyzer result when available, plus `flags` for mock transport and anti-spam rules
+
+Feedback ingestion:
+- Transport: direct POST from the extension background worker to Supabase REST
+- Storage: `public.feedback_judgments` in Supabase Postgres
+- Idempotency: one row per judged response via a unique `(conversation_id, turn_id)` index
+- Raw auditability: each row stores extracted analytical columns plus the full `raw_payload` JSONB document
 
 Failure and anti-spam behavior:
 - Offline submit attempts fail inline with a retryable message and do not send the mock event.
@@ -50,3 +55,4 @@ Load this directory as an unpacked extension in Chrome to continue Step 2 develo
 Automated browser harness:
 - For deterministic end-to-end extension validation, use the local fixture harness documented in `docs/step2/extension_automation_harness.md`.
 - The harness launches the real unpacked extension in Chrome, configures the popup automatically, serves ChatGPT-like fixtures on `127.0.0.1`, and drives assertions for panels, highlights, tooltips, invalid spans, and error states.
+- For real-page feedback verification without spending OpenAI tokens, use `python -m safety_nudges.extension.browser_harness chatgpt-feedback-e2e --json`.

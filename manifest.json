@@ -10,6 +10,7 @@
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://api.openai.com/*",
+    "https://bjokhkmomdogymmmnpdo.supabase.co/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
