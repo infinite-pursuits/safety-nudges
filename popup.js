@@ -410,7 +410,7 @@ chrome.runtime.sendMessage({ type: "SAFETY_NUDGES_GET_API_CONFIG" }, (response) 
   const loadedConfig = response && response.ok && response.config ? response.config : DEFAULT_CONFIG;
   state.config = normalizeLoadedConfig(loadedConfig);
   state.loaded = true;
-  state.screen = "main";
+  state.screen = state.config.onboardingComplete ? "main" : "onboarding";
   render();
   refreshRuntimeStatus();
 });
