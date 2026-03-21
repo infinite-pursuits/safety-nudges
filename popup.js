@@ -29,11 +29,13 @@ const toggleEnabledButton = document.getElementById("toggle-enabled");
 const toggleDescriptionNode = document.getElementById("toggle-description");
 const openAdvancedSettingsButton = document.getElementById("open-advanced-settings");
 const closeAdvancedSettingsButton = document.getElementById("close-advanced-settings");
+const advancedTestConnectionButton = document.getElementById("advanced-test-connection");
 const openAiKeyNode = document.getElementById("openai-key");
 const openAiModelNode = document.getElementById("openai-model");
 const anthropicKeyNode = document.getElementById("anthropic-key");
 const anthropicModelNode = document.getElementById("anthropic-model");
 const activityLogNode = document.getElementById("activity-log");
+const advancedConnectionStatusNode = document.getElementById("advanced-connection-status");
 
 const state = {
   config: { ...DEFAULT_CONFIG },
@@ -48,6 +50,10 @@ const state = {
   connectionStatus: {
     tone: "muted",
     message: "No connection test run yet."
+  },
+  advancedConnectionStatus: {
+    tone: "muted",
+    message: "No advanced connection test run yet."
   }
 };
 
@@ -70,6 +76,11 @@ function normalizeLoadedConfig(config) {
 
 function setConnectionStatus(message, tone = "muted") {
   state.connectionStatus = { message, tone };
+  render();
+}
+
+function setAdvancedConnectionStatus(message, tone = "muted") {
+  state.advancedConnectionStatus = { message, tone };
   render();
 }
 
@@ -249,6 +260,10 @@ function render() {
     connectionStatusNode.textContent = state.connectionStatus.message;
     connectionStatusNode.dataset.tone = state.connectionStatus.tone;
   }
+  if (advancedConnectionStatusNode) {
+    advancedConnectionStatusNode.textContent = state.advancedConnectionStatus.message;
+    advancedConnectionStatusNode.dataset.tone = state.advancedConnectionStatus.tone;
+  }
 
   if (toggleEnabledButton) {
     toggleEnabledButton.dataset.enabled = state.config.enabled ? "true" : "false";
@@ -265,6 +280,10 @@ function render() {
   if (testConnectionButton) {
     testConnectionButton.disabled = !onboardingComplete || state.isTestingConnection;
     testConnectionButton.textContent = state.isTestingConnection ? "Testing..." : "Test connection";
+  }
+  if (advancedTestConnectionButton) {
+    advancedTestConnectionButton.disabled = !onboardingComplete || state.isTestingConnection;
+    advancedTestConnectionButton.textContent = state.isTestingConnection ? "Testing..." : "Test connection";
   }
 }
 
@@ -367,6 +386,171 @@ function handleConnectionTestResult(response) {
   setConnectionStatus("❌ Connection test failed. The provider did not accept this request.", "error");
 }
 
+function sendConnectionTestRequest(config) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "SAFETY_NUDGES_TEST_CONNECTION",
+        config
+      },
+      (response) => {
+        resolve({
+          response,
+          runtimeError: chrome.runtime.lastError ? chrome.runtime.lastError.message : null
+        });
+      }
+    );
+  });
+}
+
+async function runMainConnectionTest() {
+  state.isTestingConnection = true;
+  render();
+  setPendingActivity("Connection test started", {
+    provider: state.config.provider,
+    setupMode: state.config.setupMode
+  });
+  setConnectionStatus("Testing connection...", "muted");
+  startFastActivityPolling();
+
+  try {
+    await flushPendingSave();
+  } catch (error) {
+    clearPendingActivity();
+    stopFastActivityPolling();
+    state.isTestingConnection = false;
+    render();
+    setConnectionStatus(
+      `❌ Could not save settings before testing: ${error instanceof Error ? error.message : "Unknown error"}`,
+      "error"
+    );
+    refreshRuntimeStatus();
+    return;
+  }
+
+  const { response, runtimeError } = await sendConnectionTestRequest(state.config);
+  clearPendingActivity();
+  stopFastActivityPolling();
+  state.isTestingConnection = false;
+  render();
+
+  if (runtimeError) {
+    setConnectionStatus(`❌ Connection test failed. ${runtimeError}`, "error");
+    refreshRuntimeStatus();
+    return;
+  }
+
+  handleConnectionTestResult(response);
+  refreshRuntimeStatus();
+}
+
+async function runAdvancedConnectionTest() {
+  state.isTestingConnection = true;
+  render();
+  setPendingActivity("Advanced connection test started", {
+    setupMode: state.config.setupMode
+  });
+  setAdvancedConnectionStatus("Testing configured credentials...", "muted");
+  startFastActivityPolling();
+
+  try {
+    await flushPendingSave();
+  } catch (error) {
+    clearPendingActivity();
+    stopFastActivityPolling();
+    state.isTestingConnection = false;
+    render();
+    setAdvancedConnectionStatus(
+      `❌ Could not save settings before testing: ${error instanceof Error ? error.message : "Unknown error"}`,
+      "error"
+    );
+    refreshRuntimeStatus();
+    return;
+  }
+
+  const checks = [];
+  if ((state.config.managedAccessKey || "").trim()) {
+    checks.push({
+      label: "Provided setup key",
+      config: {
+        ...state.config,
+        setupMode: "basic",
+        onboardingComplete: true
+      }
+    });
+  }
+  if ((state.config.openAiApiKey || "").trim()) {
+    checks.push({
+      label: "OpenAI",
+      config: {
+        ...state.config,
+        setupMode: "advanced",
+        provider: "openai",
+        onboardingComplete: true
+      }
+    });
+  }
+  if ((state.config.anthropicApiKey || "").trim()) {
+    checks.push({
+      label: "Anthropic",
+      config: {
+        ...state.config,
+        setupMode: "advanced",
+        provider: "anthropic",
+        onboardingComplete: true
+      }
+    });
+  }
+
+  if (checks.length === 0) {
+    clearPendingActivity();
+    stopFastActivityPolling();
+    state.isTestingConnection = false;
+    render();
+    setAdvancedConnectionStatus("❌ No provided setup key or API keys are available to test.", "error");
+    return;
+  }
+
+  const successes = [];
+  for (const check of checks) {
+    const { response, runtimeError } = await sendConnectionTestRequest(check.config);
+    if (runtimeError) {
+      clearPendingActivity();
+      stopFastActivityPolling();
+      state.isTestingConnection = false;
+      render();
+      setAdvancedConnectionStatus(`❌ ${check.label}: ${runtimeError}`, "error");
+      refreshRuntimeStatus();
+      return;
+    }
+
+    if (!response || !response.ok) {
+      const message =
+        response && response.result && response.result.message
+          ? response.result.message
+          : response && response.error
+            ? response.error
+            : "Connection test failed.";
+      clearPendingActivity();
+      stopFastActivityPolling();
+      state.isTestingConnection = false;
+      render();
+      setAdvancedConnectionStatus(`❌ ${check.label}: ${message}`, "error");
+      refreshRuntimeStatus();
+      return;
+    }
+
+    successes.push(check.label);
+  }
+
+  clearPendingActivity();
+  stopFastActivityPolling();
+  state.isTestingConnection = false;
+  render();
+  setAdvancedConnectionStatus(`✅ ${successes.join(", ")} passed connection tests.`, "success");
+  refreshRuntimeStatus();
+}
+
 function chooseAdvancedSetup() {
   state.config = {
     ...state.config,
@@ -462,56 +646,22 @@ if (toggleEnabledButton) {
 }
 
 if (testConnectionButton) {
-  testConnectionButton.addEventListener("click", async () => {
+  testConnectionButton.addEventListener("click", () => {
     if (!state.loaded) {
       return;
     }
 
-    state.isTestingConnection = true;
-    render();
-    setPendingActivity("Connection test started", {
-      provider: state.config.provider,
-      setupMode: state.config.setupMode
-    });
-    setConnectionStatus("Testing connection...", "muted");
-    startFastActivityPolling();
+    void runMainConnectionTest();
+  });
+}
 
-    try {
-      await flushPendingSave();
-    } catch (error) {
-      clearPendingActivity();
-      stopFastActivityPolling();
-      state.isTestingConnection = false;
-      render();
-      setConnectionStatus(
-        `❌ Could not save settings before testing: ${error instanceof Error ? error.message : "Unknown error"}`,
-        "error"
-      );
-      refreshRuntimeStatus();
+if (advancedTestConnectionButton) {
+  advancedTestConnectionButton.addEventListener("click", () => {
+    if (!state.loaded) {
       return;
     }
 
-    chrome.runtime.sendMessage(
-      {
-        type: "SAFETY_NUDGES_TEST_CONNECTION",
-        config: state.config
-      },
-      (response) => {
-        clearPendingActivity();
-        stopFastActivityPolling();
-        state.isTestingConnection = false;
-        render();
-
-        if (chrome.runtime.lastError) {
-          setConnectionStatus(`❌ Connection test failed. ${chrome.runtime.lastError.message}`, "error");
-          refreshRuntimeStatus();
-          return;
-        }
-
-        handleConnectionTestResult(response);
-        refreshRuntimeStatus();
-      }
-    );
+    void runAdvancedConnectionTest();
   });
 }
 
