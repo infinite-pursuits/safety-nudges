@@ -10,7 +10,9 @@ const FEEDBACK_DISCLOSURE_VERSION = "2026-03-10";
 const FEEDBACK_SUBMIT_EVENT = "judgment_feedback_submitted";
 const FEEDBACK_FAILURE_EVENT = "judgment_feedback_failed";
 const ANONYMOUS_CONVERSATION_STORAGE_KEY = "safety_nudges_anonymous_conversation_id";
+const CLAUDE_CONVERSATION_STORAGE_KEY = "safety_nudges_claude_conversation_id";
 const TURN_NODE_SELECTOR = "[data-message-author-role]";
+const FIXTURE_SURFACE_META_SELECTOR = 'meta[name="safety-nudges-surface"]';
 
 const state = {
   observer: null,
@@ -30,6 +32,33 @@ function isLocalFixtureHost() {
   return window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
 }
 
+function getFixtureSurfaceType() {
+  const root = document.documentElement;
+  const dataValue =
+    root && root.dataset && typeof root.dataset.safetyNudgesSurface === "string" ? root.dataset.safetyNudgesSurface : "";
+  const meta = document.querySelector(FIXTURE_SURFACE_META_SELECTOR);
+  const metaValue = meta && typeof meta.content === "string" ? meta.content : "";
+  const surface = (dataValue || metaValue || "chatgpt").trim().toLowerCase();
+  return surface === "claude" ? "claude" : "chatgpt";
+}
+
+function getFixtureConversationId() {
+  const fixtureRoot = document.documentElement;
+  const fixtureConversationId =
+    (fixtureRoot &&
+      fixtureRoot.dataset &&
+      typeof fixtureRoot.dataset.safetyNudgesConversationId === "string" &&
+      fixtureRoot.dataset.safetyNudgesConversationId.trim()) ||
+    (document.querySelector('meta[name="safety-nudges-conversation-id"]') || {}).content ||
+    "";
+  if (fixtureConversationId) {
+    return fixtureConversationId;
+  }
+
+  const pathParts = window.location.pathname.split("/").filter(Boolean);
+  return pathParts.length > 0 ? pathParts.at(-1) || null : null;
+}
+
 function createChatGptSurfaceAdapter() {
   return {
     id: "chatgpt",
@@ -39,11 +68,22 @@ function createChatGptSurfaceAdapter() {
     getConversationContainer() {
       return document.querySelector("main");
     },
+    getResponseMountNode(responseNode) {
+      return responseNode;
+    },
     getTurnNodes(role) {
       return Array.from(document.querySelectorAll(`${TURN_NODE_SELECTOR}[data-message-author-role="${role}"]`));
     },
-    getTranscriptTurnNodes() {
-      return Array.from(document.querySelectorAll(TURN_NODE_SELECTOR));
+    getTranscriptEntries() {
+      return Array.from(document.querySelectorAll(TURN_NODE_SELECTOR))
+        .map((node) => ({
+          role: node.getAttribute("data-message-author-role"),
+          node
+        }))
+        .filter((entry) => entry.role === "user" || entry.role === "assistant");
+    },
+    getTurnText(node) {
+      return getGenericNodeText(node);
     },
     getConversationId() {
       const pathParts = window.location.pathname.split("/").filter(Boolean);
@@ -93,37 +133,132 @@ function createFixtureSurfaceAdapter() {
       );
     },
     getConversationContainer() {
-      return document.querySelector("main");
-    },
-    getTurnNodes(role) {
-      return Array.from(document.querySelectorAll(`${TURN_NODE_SELECTOR}[data-message-author-role="${role}"]`));
-    },
-    getTranscriptTurnNodes() {
-      return Array.from(document.querySelectorAll(TURN_NODE_SELECTOR));
-    },
-    getConversationId() {
-      const fixtureRoot = document.documentElement;
-      const fixtureConversationId =
-        (fixtureRoot &&
-          fixtureRoot.dataset &&
-          typeof fixtureRoot.dataset.safetyNudgesConversationId === "string" &&
-          fixtureRoot.dataset.safetyNudgesConversationId.trim()) ||
-        (document.querySelector('meta[name="safety-nudges-conversation-id"]') || {}).content ||
-        "";
-      if (fixtureConversationId) {
-        return fixtureConversationId;
+      if (getFixtureSurfaceType() === "claude") {
+        const inputContainer = document.querySelector('[data-chat-input-container="true"]');
+        return (inputContainer && inputContainer.parentElement) || document.querySelector("main");
       }
 
-      const pathParts = window.location.pathname.split("/").filter(Boolean);
-      return pathParts.length > 0 ? pathParts.at(-1) || null : null;
+      return document.querySelector("main");
+    },
+    getResponseMountNode(responseNode) {
+      if (getFixtureSurfaceType() === "claude") {
+        return responseNode ? responseNode.querySelector(".font-claude-response") || responseNode : responseNode;
+      }
+
+      return responseNode;
+    },
+    getTurnNodes(role) {
+      if (getFixtureSurfaceType() === "claude") {
+        if (role === "user") {
+          return Array.from(document.querySelectorAll('[data-testid="user-message"]'));
+        }
+        if (role === "assistant") {
+          return Array.from(document.querySelectorAll("div[data-is-streaming]"));
+        }
+        return [];
+      }
+
+      return Array.from(document.querySelectorAll(`${TURN_NODE_SELECTOR}[data-message-author-role="${role}"]`));
+    },
+    getTranscriptEntries() {
+      if (getFixtureSurfaceType() === "claude") {
+        return Array.from(document.querySelectorAll('[data-testid="user-message"], div[data-is-streaming]'))
+          .map((node) => ({
+            role: node.matches('[data-testid="user-message"]') ? "user" : "assistant",
+            node
+          }))
+          .filter((entry) => entry.role === "user" || entry.role === "assistant");
+      }
+
+      return Array.from(document.querySelectorAll(TURN_NODE_SELECTOR))
+        .map((node) => ({
+          role: node.getAttribute("data-message-author-role"),
+          node
+        }))
+        .filter((entry) => entry.role === "user" || entry.role === "assistant");
+    },
+    getTurnText(node, role) {
+      if (getFixtureSurfaceType() === "claude" && role === "assistant") {
+        return getClaudeAssistantText(node);
+      }
+
+      return getGenericNodeText(node);
+    },
+    getConversationId() {
+      return getFixtureConversationId();
     },
     isGenerationInProgress() {
-      return false;
+      return getFixtureSurfaceType() === "claude"
+        ? Boolean(document.querySelector('div[data-is-streaming="true"]'))
+        : false;
     }
   };
 }
 
-const SURFACE_ADAPTERS = [createFixtureSurfaceAdapter(), createChatGptSurfaceAdapter()];
+function createClaudeSurfaceAdapter() {
+  return {
+    id: "claude",
+    matches() {
+      return window.location.hostname === "claude.ai";
+    },
+    getConversationContainer() {
+      const inputContainer = document.querySelector('[data-chat-input-container="true"]');
+      return (inputContainer && inputContainer.parentElement) || document.querySelector("main");
+    },
+    getResponseMountNode(responseNode) {
+      return responseNode ? responseNode.querySelector(".font-claude-response") || responseNode : responseNode;
+    },
+    getTurnNodes(role) {
+      if (role === "user") {
+        return Array.from(document.querySelectorAll('[data-testid="user-message"]'));
+      }
+      if (role === "assistant") {
+        return Array.from(document.querySelectorAll("div[data-is-streaming]"));
+      }
+      return [];
+    },
+    getTranscriptEntries() {
+      return Array.from(document.querySelectorAll('[data-testid="user-message"], div[data-is-streaming]'))
+        .map((node) => ({
+          role: node.matches('[data-testid="user-message"]') ? "user" : "assistant",
+          node
+        }))
+        .filter((entry) => entry.role === "user" || entry.role === "assistant");
+    },
+    getTurnText(node, role) {
+      if (role === "assistant") {
+        return getClaudeAssistantText(node);
+      }
+
+      return getGenericNodeText(node);
+    },
+    getConversationId() {
+      const pathParts = window.location.pathname.split("/").filter(Boolean);
+      const lastPathPart = pathParts.length > 0 ? pathParts.at(-1) || null : null;
+      if (lastPathPart && lastPathPart !== "new") {
+        return lastPathPart;
+      }
+
+      try {
+        const existingId = window.sessionStorage.getItem(CLAUDE_CONVERSATION_STORAGE_KEY);
+        if (existingId && existingId.trim()) {
+          return existingId.trim();
+        }
+
+        const generatedId = `claude-session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+        window.sessionStorage.setItem(CLAUDE_CONVERSATION_STORAGE_KEY, generatedId);
+        return generatedId;
+      } catch (_error) {
+        return `claude-session-${Date.now()}`;
+      }
+    },
+    isGenerationInProgress() {
+      return Boolean(document.querySelector('div[data-is-streaming="true"]'));
+    }
+  };
+}
+
+const SURFACE_ADAPTERS = [createFixtureSurfaceAdapter(), createClaudeSurfaceAdapter(), createChatGptSurfaceAdapter()];
 let activeSurfaceAdapter = null;
 
 function getActiveSurfaceAdapter() {
@@ -208,7 +343,7 @@ function unwrapCloneNode(node) {
   parent.removeChild(node);
 }
 
-function getNodeText(node) {
+function getGenericNodeText(node) {
   if (!node) {
     return "";
   }
@@ -227,8 +362,39 @@ function getNodeText(node) {
   return clone.innerText.replace(/\s+/g, " ").trim();
 }
 
+function getClaudeAssistantText(node) {
+  if (!node) {
+    return "";
+  }
+
+  const blocks = Array.from(node.querySelectorAll(".font-claude-response-body"));
+  if (blocks.length > 0) {
+    return blocks
+      .map((block) => {
+        if (!(block instanceof HTMLElement)) {
+          return "";
+        }
+        return block.innerText.replace(/\s+/g, " ").trim();
+      })
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+  }
+
+  return getGenericNodeText(node);
+}
+
+function getNodeText(node, role = null) {
+  const adapter = getActiveSurfaceAdapter();
+  if (adapter && typeof adapter.getTurnText === "function") {
+    return adapter.getTurnText(node, role);
+  }
+
+  return getGenericNodeText(node);
+}
+
 function getLastTurnText(role) {
-  return getNodeText(getLastTurnNode(role));
+  return getNodeText(getLastTurnNode(role), role);
 }
 
 function getConversationId() {
@@ -253,7 +419,12 @@ function readLatestConversationTurn() {
   const promptNode = getLastTurnNode("user");
   const prompt = getLastTurnText("user");
   const responseNode = getLastTurnNode("assistant");
-  const response = getNodeText(responseNode);
+  const response = getNodeText(responseNode, "assistant");
+  const adapter = getActiveSurfaceAdapter();
+  const responseMountNode =
+    adapter && typeof adapter.getResponseMountNode === "function"
+      ? adapter.getResponseMountNode(responseNode)
+      : responseNode;
 
   if (!prompt || !response || !responseNode || !promptNode) {
     return null;
@@ -264,6 +435,7 @@ function readLatestConversationTurn() {
     prompt,
     promptNode,
     response,
+    responseMountNode: responseMountNode || responseNode,
     capturedAt: new Date().toISOString(),
     conversationId: getConversationId(),
     responseNode
@@ -282,16 +454,17 @@ function buildSerializablePayload(payload) {
 
 function readConversationTranscript() {
   const adapter = getActiveSurfaceAdapter();
-  const turnNodes = adapter ? adapter.getTranscriptTurnNodes() : [];
+  const transcriptEntries = adapter && typeof adapter.getTranscriptEntries === "function" ? adapter.getTranscriptEntries() : [];
   const transcript = [];
 
-  for (const node of turnNodes) {
-    const role = node.getAttribute("data-message-author-role");
+  for (const entry of transcriptEntries) {
+    const role = entry && typeof entry.role === "string" ? entry.role : "";
+    const node = entry ? entry.node : null;
     if (role !== "user" && role !== "assistant") {
       continue;
     }
 
-    const content = getNodeText(node);
+    const content = getNodeText(node, role);
     if (!content) {
       continue;
     }
@@ -982,6 +1155,10 @@ function toggleResponsePanel(fingerprint) {
 }
 
 function ensureResponseAnchor(responseNode, fingerprint) {
+  if (!responseNode) {
+    return null;
+  }
+
   let anchor = Array.from(responseNode.children).find(
     (child) => child.classList && child.classList.contains("safety-nudges-response-anchor")
   );
@@ -1700,7 +1877,7 @@ function renderFeedbackSection(anchor, feedbackState, analysisState = null) {
 }
 
 function renderResponseIndicator(payload, fingerprint, analysisState) {
-  const responseNode = payload.responseNode;
+  const responseNode = payload && payload.responseMountNode ? payload.responseMountNode : payload.responseNode;
   if (!responseNode || !responseNode.isConnected) {
     return;
   }

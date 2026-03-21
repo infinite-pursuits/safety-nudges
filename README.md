@@ -3,9 +3,9 @@
 This directory contains the active Step 2 Chrome extension baseline.
 
 What is implemented:
-- Manifest V3 extension wiring limited to ChatGPT surfaces (`chatgpt.com` and `chat.openai.com`).
+- Manifest V3 extension wiring for ChatGPT surfaces (`chatgpt.com` and `chat.openai.com`) plus Claude web (`claude.ai`).
 - A background service worker that can call OpenAI directly, call Anthropic directly, call Ollama's local `/api/chat` endpoint, or POST to a custom local analysis endpoint, then normalize Step 1-style results.
-- A content script that watches the ChatGPT conversation DOM, waits for a quiet period after mutations, and extracts the latest user prompt plus assistant response.
+- A content script with host adapters for ChatGPT-style and Claude-style DOMs that waits for a quiet period after mutations and extracts the latest user prompt plus assistant response.
 - A small lower-right in-page nudge that stays hidden unless an issue is detected (or debug mode is enabled).
 - A judgments-panel feedback flow with thumbs up/down, an optional short comment, inline consent copy, and direct Supabase persistence for submitted feedback.
 - A popup that lets you store your OpenAI or Anthropic API key locally inside the extension, switch providers, configure an Ollama model, and watch a live activity log.
@@ -35,7 +35,7 @@ Running the local bridge:
 - In the extension popup, choose `Local endpoint` and use `http://127.0.0.1:8787/analyze`
 
 What is intentionally stubbed:
-- Hardening the ChatGPT DOM selectors beyond the current baseline heuristics.
+- Hardening the host-adapter selectors against large upstream DOM churn beyond the current ChatGPT/Claude baseline heuristics.
 
 Judgment feedback contract:
 - Event name: `judgment_feedback_submitted`
@@ -59,5 +59,7 @@ Load this directory as an unpacked extension in Chrome to continue Step 2 develo
 
 Automated browser harness:
 - For deterministic end-to-end extension validation, use the local fixture harness documented in `docs/step2/extension_automation_harness.md`.
-- The harness launches the real unpacked extension in Chrome, configures the popup automatically, serves ChatGPT-like fixtures on `127.0.0.1`, and drives assertions for panels, highlights, tooltips, invalid spans, and error states.
+- The harness launches the real unpacked extension in Chrome, configures the popup automatically, serves ChatGPT-like and Claude-like fixtures on `127.0.0.1`, and drives assertions for panels, highlights, tooltips, invalid spans, and error states.
+- For the Claude DOM path specifically, use `python -m safety_nudges.extension.browser_harness fixture-probe --scenario claude-highlight --json`.
 - For real-page feedback verification without spending OpenAI tokens, use `python -m safety_nudges.extension.browser_harness chatgpt-feedback-e2e --json`.
+- Live `claude.ai` smoke validation is intentionally separate from the deterministic harness path because it requires an authenticated Claude session/profile.

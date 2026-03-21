@@ -2,13 +2,14 @@
   "manifest_version": 3,
   "name": "Safety Nudges",
   "version": "0.1.0",
-  "description": "ChatGPT-only baseline extension for Safety Nudges.",
+  "description": "Safety Nudges extension baseline for ChatGPT and Claude surfaces.",
   "permissions": [
     "storage"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
+    "https://claude.ai/*",
     "https://api.openai.com/*",
     "https://api.anthropic.com/*",
     "https://bjokhkmomdogymmmnpdo.supabase.co/*",
@@ -27,6 +28,7 @@
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
+        "https://claude.ai/*",
         "http://127.0.0.1/*",
         "http://localhost/*"
       ],
