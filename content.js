@@ -203,6 +203,10 @@ function createClaudeSurfaceAdapter() {
     },
     getConversationContainer() {
       const inputContainer = document.querySelector('[data-chat-input-container="true"]');
+      if (inputContainer && inputContainer.previousElementSibling instanceof Element) {
+        return inputContainer.previousElementSibling;
+      }
+
       return (inputContainer && inputContainer.parentElement) || document.querySelector("main");
     },
     getResponseMountNode(responseNode) {
@@ -251,6 +255,16 @@ function createClaudeSurfaceAdapter() {
       } catch (_error) {
         return `claude-session-${Date.now()}`;
       }
+    },
+    isIgnoredMutationNode(node) {
+      if (!(node instanceof Element)) {
+        return false;
+      }
+
+      return Boolean(
+        node.closest('[data-chat-input-container="true"]') ||
+          node.closest('[role="group"][aria-label="Message actions"]')
+      );
     },
     isGenerationInProgress() {
       return Boolean(document.querySelector('div[data-is-streaming="true"]'));
@@ -2046,6 +2060,31 @@ function isInternalMutationNode(node) {
   return Boolean(node.closest(".safety-nudges-response-anchor") || node.closest(".safety-nudges-inline-highlight"));
 }
 
+function isIgnoredMutationNode(node) {
+  if (!node) {
+    return false;
+  }
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    return Boolean(node.parentElement && isIgnoredMutationNode(node.parentElement));
+  }
+
+  if (!(node instanceof Element)) {
+    return false;
+  }
+
+  if (isInternalMutationNode(node)) {
+    return true;
+  }
+
+  const adapter = getActiveSurfaceAdapter();
+  if (adapter && typeof adapter.isIgnoredMutationNode === "function") {
+    return adapter.isIgnoredMutationNode(node);
+  }
+
+  return false;
+}
+
 function installMutationObserver() {
   const container = getConversationContainer();
   if (!container) {
@@ -2060,13 +2099,13 @@ function installMutationObserver() {
   state.observer = new MutationObserver((mutations) => {
     const hasRelevantMutation = mutations.some((mutation) => {
       if (mutation.type === "characterData") {
-        return !isInternalMutationNode(mutation.target);
+        return !isIgnoredMutationNode(mutation.target);
       }
 
       const addedNodes = Array.from(mutation.addedNodes || []);
       const removedNodes = Array.from(mutation.removedNodes || []);
-      const externalAdded = addedNodes.some((node) => !isInternalMutationNode(node));
-      const externalRemoved = removedNodes.some((node) => !isInternalMutationNode(node));
+      const externalAdded = addedNodes.some((node) => !isIgnoredMutationNode(node));
+      const externalRemoved = removedNodes.some((node) => !isIgnoredMutationNode(node));
       return externalAdded || externalRemoved;
     });
 
