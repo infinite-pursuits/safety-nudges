@@ -416,6 +416,35 @@ function getLastTurnText(role) {
   return getNodeText(getLastTurnNode(role), role);
 }
 
+function getTranscriptEntries() {
+  const adapter = getActiveSurfaceAdapter();
+  return adapter && typeof adapter.getTranscriptEntries === "function" ? adapter.getTranscriptEntries() : [];
+}
+
+function getLatestPromptResponsePair() {
+  const transcriptEntries = getTranscriptEntries();
+  if (transcriptEntries.length < 2) {
+    return null;
+  }
+
+  const responseEntry = transcriptEntries.at(-1) || null;
+  const promptEntry = transcriptEntries.at(-2) || null;
+  if (!responseEntry || !promptEntry) {
+    return null;
+  }
+
+  if (promptEntry.role !== "user" || responseEntry.role !== "assistant") {
+    return null;
+  }
+
+  return {
+    promptNode: promptEntry.node || null,
+    prompt: getNodeText(promptEntry.node || null, "user"),
+    responseNode: responseEntry.node || null,
+    response: getNodeText(responseEntry.node || null, "assistant")
+  };
+}
+
 function getConversationId() {
   const adapter = getActiveSurfaceAdapter();
   return adapter ? adapter.getConversationId() : null;
@@ -435,10 +464,12 @@ function buildFingerprint(payload) {
 }
 
 function readLatestConversationTurn() {
-  const promptNode = getLastTurnNode("user");
-  const prompt = getLastTurnText("user");
-  const responseNode = getLastTurnNode("assistant");
-  const response = getNodeText(responseNode, "assistant");
+  const latestPair = getLatestPromptResponsePair();
+  if (!latestPair) {
+    return null;
+  }
+
+  const { promptNode, prompt, responseNode, response } = latestPair;
   const adapter = getActiveSurfaceAdapter();
   const responseMountNode =
     adapter && typeof adapter.getResponseMountNode === "function"
@@ -472,8 +503,7 @@ function buildSerializablePayload(payload) {
 }
 
 function readConversationTranscript() {
-  const adapter = getActiveSurfaceAdapter();
-  const transcriptEntries = adapter && typeof adapter.getTranscriptEntries === "function" ? adapter.getTranscriptEntries() : [];
+  const transcriptEntries = getTranscriptEntries();
   const transcript = [];
 
   for (const entry of transcriptEntries) {
