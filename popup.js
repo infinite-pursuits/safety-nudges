@@ -2,6 +2,8 @@ const statusNode = document.getElementById("status");
 const providerNode = document.getElementById("provider");
 const openAiKeyNode = document.getElementById("openai-key");
 const openAiModelNode = document.getElementById("openai-model");
+const anthropicKeyNode = document.getElementById("anthropic-key");
+const anthropicModelNode = document.getElementById("anthropic-model");
 const localEndpointNode = document.getElementById("endpoint");
 const ollamaEndpointNode = document.getElementById("ollama-endpoint");
 const ollamaModelNode = document.getElementById("ollama-model");
@@ -10,17 +12,21 @@ const identifySpansNode = document.getElementById("identify-spans");
 const saveButton = document.getElementById("save");
 const testConnectionButton = document.getElementById("test-connection");
 const activityLogNode = document.getElementById("activity-log");
+const providerSectionNodes = Array.from(document.querySelectorAll("[data-provider-section]"));
 
 let activityPollHandle = null;
 let activityFastPollHandle = null;
 let hasLoadedConfig = false;
 let hasUserEditedForm = false;
 let pendingActivityEntry = null;
+let providerDefinitions = [];
 
 const formNodes = [
   providerNode,
   openAiKeyNode,
   openAiModelNode,
+  anthropicKeyNode,
+  anthropicModelNode,
   localEndpointNode,
   ollamaEndpointNode,
   ollamaModelNode,
@@ -55,6 +61,43 @@ function setActionButtonsEnabled(enabled) {
 
 function markFormDirty() {
   hasUserEditedForm = true;
+}
+
+function getProviderDefinition(providerId) {
+  return providerDefinitions.find((definition) => definition.id === providerId) || null;
+}
+
+function renderProviderOptions(definitions) {
+  if (!providerNode) {
+    return;
+  }
+
+  const previousValue = providerNode.value;
+  providerNode.replaceChildren();
+  for (const definition of definitions) {
+    const option = document.createElement("option");
+    option.value = definition.id;
+    option.textContent = definition.label;
+    providerNode.appendChild(option);
+  }
+
+  const nextValue = definitions.some((definition) => definition.id === previousValue)
+    ? previousValue
+    : definitions[0] && definitions[0].id
+      ? definitions[0].id
+      : "openai";
+  providerNode.value = nextValue;
+}
+
+function updateProviderSectionVisibility() {
+  const providerId = providerNode ? providerNode.value : "openai";
+  const definition = getProviderDefinition(providerId);
+  const visibleSections = new Set(definition && Array.isArray(definition.settingsSections) ? definition.settingsSections : []);
+
+  for (const node of providerSectionNodes) {
+    const sectionId = node.dataset.providerSection || "";
+    node.hidden = !visibleSections.has(sectionId);
+  }
 }
 
 function clearPendingActivity() {
@@ -143,6 +186,8 @@ function collectConfigFromForm() {
     provider: providerNode ? providerNode.value : "openai",
     openAiApiKey: openAiKeyNode ? openAiKeyNode.value.trim() : "",
     openAiModel: openAiModelNode ? openAiModelNode.value.trim() : "",
+    anthropicApiKey: anthropicKeyNode ? anthropicKeyNode.value.trim() : "",
+    anthropicModel: anthropicModelNode ? anthropicModelNode.value.trim() : "",
     endpoint: localEndpointNode ? localEndpointNode.value.trim() : "",
     ollamaEndpoint: ollamaEndpointNode ? ollamaEndpointNode.value.trim() : "",
     ollamaModel: ollamaModelNode ? ollamaModelNode.value.trim() : "",
@@ -168,6 +213,14 @@ function applyConfigToForm(config) {
     openAiModelNode.value = config.openAiModel || "gpt-5-mini";
   }
 
+  if (anthropicKeyNode) {
+    anthropicKeyNode.value = config.anthropicApiKey || "";
+  }
+
+  if (anthropicModelNode) {
+    anthropicModelNode.value = config.anthropicModel || "claude-sonnet-4-6";
+  }
+
   if (localEndpointNode) {
     localEndpointNode.value = config.endpoint || "";
   }
@@ -187,6 +240,8 @@ function applyConfigToForm(config) {
   if (identifySpansNode) {
     identifySpansNode.checked = config.identifySpans !== false;
   }
+
+  updateProviderSectionVisibility();
 }
 
 function saveConfig(config) {
@@ -216,7 +271,12 @@ function saveConfig(config) {
 
 formNodes.forEach((node) => {
   const eventName = node === enabledNode || node === providerNode ? "change" : "input";
-  node.addEventListener(eventName, markFormDirty);
+  node.addEventListener(eventName, () => {
+    markFormDirty();
+    if (node === providerNode) {
+      updateProviderSectionVisibility();
+    }
+  });
 });
 
 setActionButtonsEnabled(false);
@@ -251,6 +311,17 @@ chrome.runtime.sendMessage({ type: "SAFETY_NUDGES_GET_API_CONFIG" }, (response) 
   hasLoadedConfig = true;
   setActionButtonsEnabled(true);
   setStatus("Shell ready. Configure analysis below. Activity logs update live while this popup is open.");
+});
+
+chrome.runtime.sendMessage({ type: "SAFETY_NUDGES_GET_PROVIDER_DEFINITIONS" }, (response) => {
+  if (!response || !response.ok || !Array.isArray(response.providers) || response.providers.length === 0) {
+    updateProviderSectionVisibility();
+    return;
+  }
+
+  providerDefinitions = response.providers;
+  renderProviderOptions(providerDefinitions);
+  updateProviderSectionVisibility();
 });
 
 if (saveButton) {

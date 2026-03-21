@@ -4,15 +4,20 @@ This directory contains the active Step 2 Chrome extension baseline.
 
 What is implemented:
 - Manifest V3 extension wiring limited to ChatGPT surfaces (`chatgpt.com` and `chat.openai.com`).
-- A background service worker that can call OpenAI directly, call Ollama's local `/api/chat` endpoint, or POST to a custom local analysis endpoint, then normalize Step 1-style results.
+- A background service worker that can call OpenAI directly, call Anthropic directly, call Ollama's local `/api/chat` endpoint, or POST to a custom local analysis endpoint, then normalize Step 1-style results.
 - A content script that watches the ChatGPT conversation DOM, waits for a quiet period after mutations, and extracts the latest user prompt plus assistant response.
 - A small lower-right in-page nudge that stays hidden unless an issue is detected (or debug mode is enabled).
 - A judgments-panel feedback flow with thumbs up/down, an optional short comment, inline consent copy, and direct Supabase persistence for submitted feedback.
-- A popup that lets you store your OpenAI API key locally inside the extension, switch providers, configure an Ollama model, and watch a live activity log.
+- A popup that lets you store your OpenAI or Anthropic API key locally inside the extension, switch providers, configure an Ollama model, and watch a live activity log.
 
 Testing visibility:
 - The background service worker logs request start, response receipt, latency, provider-specific metadata, no-issue completions, issue detections, and failures to the extension console.
 - The popup shows the same recent activity log so you can confirm the flow worked even when no issue was detected.
+
+Using Anthropic:
+- Paste an Anthropic API key into the popup and choose `Direct Anthropic`.
+- The extension uses Anthropic's Messages API and expects the model to return JSON matching the Step 1 issue schema.
+- Manual Anthropic key entry should remain available even if the future alpha onboarding flow provisions managed credentials through Supabase Edge Functions.
 
 Using Ollama:
 - Install and run Ollama locally so the default API is available at `http://127.0.0.1:11434/api/chat`.

@@ -104,21 +104,35 @@
     <label for="provider">Analysis provider</label>
     <select id="provider">
       <option value="openai">Direct OpenAI</option>
+      <option value="anthropic">Direct Anthropic</option>
       <option value="ollama">Ollama (local model)</option>
       <option value="local">Local endpoint</option>
     </select>
-    <label for="openai-key">OpenAI API key</label>
-    <input id="openai-key" type="password" placeholder="sk-...">
-    <p>The key is stored only in this extension's local Chrome storage on your machine.</p>
-    <label for="openai-model">OpenAI model</label>
-    <input id="openai-model" type="text" placeholder="gpt-5-mini">
-    <label for="ollama-endpoint">Ollama chat endpoint</label>
-    <input id="ollama-endpoint" type="url" placeholder="http://127.0.0.1:11434/api/chat">
-    <label for="ollama-model">Ollama model</label>
-    <input id="ollama-model" type="text" placeholder="llama3.1:8b">
-    <p>For local Ollama, make sure the model is already pulled and the Ollama server is running.</p>
-    <label for="endpoint">Custom analysis endpoint</label>
-    <input id="endpoint" type="url" placeholder="http://127.0.0.1:8787/analyze">
+    <div data-provider-section="openai">
+      <label for="openai-key">OpenAI API key</label>
+      <input id="openai-key" type="password" placeholder="sk-...">
+      <p>The key is stored only in this extension's local Chrome storage on your machine.</p>
+      <label for="openai-model">OpenAI model</label>
+      <input id="openai-model" type="text" placeholder="gpt-5-mini">
+    </div>
+    <div data-provider-section="anthropic">
+      <label for="anthropic-key">Anthropic API key</label>
+      <input id="anthropic-key" type="password" placeholder="sk-ant-...">
+      <p>The Anthropic key is also stored only in this extension's local Chrome storage on your machine.</p>
+      <label for="anthropic-model">Anthropic model</label>
+      <input id="anthropic-model" type="text" placeholder="claude-sonnet-4-6">
+    </div>
+    <div data-provider-section="ollama">
+      <label for="ollama-endpoint">Ollama chat endpoint</label>
+      <input id="ollama-endpoint" type="url" placeholder="http://127.0.0.1:11434/api/chat">
+      <label for="ollama-model">Ollama model</label>
+      <input id="ollama-model" type="text" placeholder="llama3.1:8b">
+      <p>For local Ollama, make sure the model is already pulled and the Ollama server is running.</p>
+    </div>
+    <div data-provider-section="local">
+      <label for="endpoint">Custom analysis endpoint</label>
+      <input id="endpoint" type="url" placeholder="http://127.0.0.1:8787/analyze">
+    </div>
     <label class="checkbox-row" for="enabled">
       <input id="enabled" type="checkbox" checked>
       Enable live analysis requests

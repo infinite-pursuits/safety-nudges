@@ -10,6 +10,7 @@ const FEEDBACK_DISCLOSURE_VERSION = "2026-03-10";
 const FEEDBACK_SUBMIT_EVENT = "judgment_feedback_submitted";
 const FEEDBACK_FAILURE_EVENT = "judgment_feedback_failed";
 const ANONYMOUS_CONVERSATION_STORAGE_KEY = "safety_nudges_anonymous_conversation_id";
+const TURN_NODE_SELECTOR = "[data-message-author-role]";
 
 const state = {
   observer: null,
@@ -25,32 +26,117 @@ const state = {
   extensionRecoveryAttempted: false
 };
 
-function isChatGptHost() {
-  return window.location.hostname === "chatgpt.com" || window.location.hostname === "chat.openai.com";
-}
-
 function isLocalFixtureHost() {
   return window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
 }
 
-function isFixturePageEnabled() {
-  if (!isLocalFixtureHost()) {
-    return false;
+function createChatGptSurfaceAdapter() {
+  return {
+    id: "chatgpt",
+    matches() {
+      return window.location.hostname === "chatgpt.com" || window.location.hostname === "chat.openai.com";
+    },
+    getConversationContainer() {
+      return document.querySelector("main");
+    },
+    getTurnNodes(role) {
+      return Array.from(document.querySelectorAll(`${TURN_NODE_SELECTOR}[data-message-author-role="${role}"]`));
+    },
+    getTranscriptTurnNodes() {
+      return Array.from(document.querySelectorAll(TURN_NODE_SELECTOR));
+    },
+    getConversationId() {
+      const pathParts = window.location.pathname.split("/").filter(Boolean);
+      if (pathParts.length > 0) {
+        return pathParts.at(-1) || null;
+      }
+
+      try {
+        const existingId = window.sessionStorage.getItem(ANONYMOUS_CONVERSATION_STORAGE_KEY);
+        if (existingId && existingId.trim()) {
+          return existingId.trim();
+        }
+
+        const generatedId = `chatgpt-anon-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+        window.sessionStorage.setItem(ANONYMOUS_CONVERSATION_STORAGE_KEY, generatedId);
+        return generatedId;
+      } catch (_error) {
+        return `chatgpt-anon-${Date.now()}`;
+      }
+    },
+    isGenerationInProgress() {
+      const buttons = Array.from(document.querySelectorAll("button"));
+      return buttons.some((button) => {
+        const label = (button.getAttribute("aria-label") || button.innerText || "").trim().toLowerCase();
+        return label.includes("stop generating") || label === "stop";
+      });
+    }
+  };
+}
+
+function createFixtureSurfaceAdapter() {
+  return {
+    id: "fixture",
+    matches() {
+      if (!isLocalFixtureHost()) {
+        return false;
+      }
+
+      if (!window.location.pathname.startsWith("/fixtures/")) {
+        return false;
+      }
+
+      const root = document.documentElement;
+      return Boolean(
+        (root && root.dataset && root.dataset.safetyNudgesFixture === "true") ||
+          document.querySelector('meta[name="safety-nudges-fixture"][content="true"]')
+      );
+    },
+    getConversationContainer() {
+      return document.querySelector("main");
+    },
+    getTurnNodes(role) {
+      return Array.from(document.querySelectorAll(`${TURN_NODE_SELECTOR}[data-message-author-role="${role}"]`));
+    },
+    getTranscriptTurnNodes() {
+      return Array.from(document.querySelectorAll(TURN_NODE_SELECTOR));
+    },
+    getConversationId() {
+      const fixtureRoot = document.documentElement;
+      const fixtureConversationId =
+        (fixtureRoot &&
+          fixtureRoot.dataset &&
+          typeof fixtureRoot.dataset.safetyNudgesConversationId === "string" &&
+          fixtureRoot.dataset.safetyNudgesConversationId.trim()) ||
+        (document.querySelector('meta[name="safety-nudges-conversation-id"]') || {}).content ||
+        "";
+      if (fixtureConversationId) {
+        return fixtureConversationId;
+      }
+
+      const pathParts = window.location.pathname.split("/").filter(Boolean);
+      return pathParts.length > 0 ? pathParts.at(-1) || null : null;
+    },
+    isGenerationInProgress() {
+      return false;
+    }
+  };
+}
+
+const SURFACE_ADAPTERS = [createFixtureSurfaceAdapter(), createChatGptSurfaceAdapter()];
+let activeSurfaceAdapter = null;
+
+function getActiveSurfaceAdapter() {
+  if (activeSurfaceAdapter && activeSurfaceAdapter.matches()) {
+    return activeSurfaceAdapter;
   }
 
-  if (!window.location.pathname.startsWith("/fixtures/")) {
-    return false;
-  }
-
-  const root = document.documentElement;
-  return Boolean(
-    (root && root.dataset && root.dataset.safetyNudgesFixture === "true") ||
-      document.querySelector('meta[name="safety-nudges-fixture"][content="true"]')
-  );
+  activeSurfaceAdapter = SURFACE_ADAPTERS.find((adapter) => adapter.matches()) || null;
+  return activeSurfaceAdapter;
 }
 
 function isSupportedSurface() {
-  return isChatGptHost() || isFixturePageEnabled();
+  return Boolean(getActiveSurfaceAdapter());
 }
 
 function formatLabel(value) {
@@ -96,11 +182,13 @@ function buildCompletionMessage(result) {
 }
 
 function getConversationContainer() {
-  return document.querySelector("main");
+  const adapter = getActiveSurfaceAdapter();
+  return adapter ? adapter.getConversationContainer() : null;
 }
 
 function getTurnNodes(role) {
-  return Array.from(document.querySelectorAll(`[data-message-author-role="${role}"]`));
+  const adapter = getActiveSurfaceAdapter();
+  return adapter ? adapter.getTurnNodes(role) : [];
 }
 
 function getLastTurnNode(role) {
@@ -144,39 +232,8 @@ function getLastTurnText(role) {
 }
 
 function getConversationId() {
-  const fixtureRoot = document.documentElement;
-  const fixtureConversationId =
-    (fixtureRoot &&
-      fixtureRoot.dataset &&
-      typeof fixtureRoot.dataset.safetyNudgesConversationId === "string" &&
-      fixtureRoot.dataset.safetyNudgesConversationId.trim()) ||
-    (document.querySelector('meta[name="safety-nudges-conversation-id"]') || {}).content ||
-    "";
-  if (fixtureConversationId) {
-    return fixtureConversationId;
-  }
-
-  const pathParts = window.location.pathname.split("/").filter(Boolean);
-  if (pathParts.length > 0) {
-    return pathParts.at(-1) || null;
-  }
-
-  if (isChatGptHost()) {
-    try {
-      const existingId = window.sessionStorage.getItem(ANONYMOUS_CONVERSATION_STORAGE_KEY);
-      if (existingId && existingId.trim()) {
-        return existingId.trim();
-      }
-
-      const generatedId = `chatgpt-anon-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-      window.sessionStorage.setItem(ANONYMOUS_CONVERSATION_STORAGE_KEY, generatedId);
-      return generatedId;
-    } catch (_error) {
-      return `chatgpt-anon-${Date.now()}`;
-    }
-  }
-
-  return null;
+  const adapter = getActiveSurfaceAdapter();
+  return adapter ? adapter.getConversationId() : null;
 }
 
 function nowMs() {
@@ -184,11 +241,8 @@ function nowMs() {
 }
 
 function isGenerationInProgress() {
-  const buttons = Array.from(document.querySelectorAll("button"));
-  return buttons.some((button) => {
-    const label = (button.getAttribute("aria-label") || button.innerText || "").trim().toLowerCase();
-    return label.includes("stop generating") || label === "stop";
-  });
+  const adapter = getActiveSurfaceAdapter();
+  return adapter ? adapter.isGenerationInProgress() : false;
 }
 
 function buildFingerprint(payload) {
@@ -227,7 +281,8 @@ function buildSerializablePayload(payload) {
 }
 
 function readConversationTranscript() {
-  const turnNodes = Array.from(document.querySelectorAll("[data-message-author-role]"));
+  const adapter = getActiveSurfaceAdapter();
+  const turnNodes = adapter ? adapter.getTranscriptTurnNodes() : [];
   const transcript = [];
 
   for (const node of turnNodes) {

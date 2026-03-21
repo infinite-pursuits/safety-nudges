@@ -13,10 +13,15 @@ const DEFAULT_API_CONFIG = {
   identifySpans: true,
   openAiApiKey: "",
   openAiModel: "gpt-5-mini",
+  anthropicApiKey: "",
+  anthropicModel: "claude-sonnet-4-6",
   ollamaModel: "llama3.1:8b"
 };
 const SUPABASE_URL = "https://bjokhkmomdogymmmnpdo.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_KdngS39ZCxvJ854R0zy3xA_0LKy8nj5";
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_API_VERSION = "2023-06-01";
 
 const MAX_ACTIVITY_LOGS = 40;
 const NETWORK_TIMEOUT_MS = 30000;
@@ -213,10 +218,7 @@ function getStoredApiConfig() {
 
 function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
   return {
-    provider:
-      config.provider === "local" || config.provider === "ollama"
-        ? config.provider
-        : "openai",
+    provider: normalizeProviderName(config.provider),
     endpoint: config.endpoint || existing.endpoint || DEFAULT_API_CONFIG.endpoint,
     ollamaEndpoint:
       config.ollamaEndpoint || existing.ollamaEndpoint || DEFAULT_API_CONFIG.ollamaEndpoint,
@@ -227,6 +229,11 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
         ? config.openAiApiKey.trim()
         : existing.openAiApiKey || DEFAULT_API_CONFIG.openAiApiKey,
     openAiModel: config.openAiModel || existing.openAiModel || DEFAULT_API_CONFIG.openAiModel,
+    anthropicApiKey:
+      typeof config.anthropicApiKey === "string" && config.anthropicApiKey.trim()
+        ? config.anthropicApiKey.trim()
+        : existing.anthropicApiKey || DEFAULT_API_CONFIG.anthropicApiKey,
+    anthropicModel: config.anthropicModel || existing.anthropicModel || DEFAULT_API_CONFIG.anthropicModel,
     ollamaModel: config.ollamaModel || existing.ollamaModel || DEFAULT_API_CONFIG.ollamaModel
   };
 }
@@ -250,10 +257,12 @@ function setStoredApiConfig(config) {
             enabled: nextConfig.enabled,
             identifySpans: nextConfig.identifySpans,
             openAiModel: nextConfig.openAiModel,
+            anthropicModel: nextConfig.anthropicModel,
             ollamaModel: nextConfig.ollamaModel,
             localEndpoint: nextConfig.endpoint,
             ollamaEndpoint: nextConfig.ollamaEndpoint,
-            hasOpenAiKey: Boolean(nextConfig.openAiApiKey)
+            hasOpenAiKey: Boolean(nextConfig.openAiApiKey),
+            hasAnthropicKey: Boolean(nextConfig.anthropicApiKey)
           });
           resolve();
         }
@@ -286,7 +295,11 @@ function buildAnalysisRequest(payload) {
   };
 }
 
-function buildOpenAiMessages(payload) {
+function normalizeProviderName(value) {
+  return value === "local" || value === "ollama" || value === "anthropic" ? value : "openai";
+}
+
+function buildAnalysisPromptParts(payload) {
   const systemPrompt = [
     "You are labeling a single latest-turn chatbot interaction for safety issues.",
     "Return JSON only with keys has_potential_issues and issues.",
@@ -311,6 +324,15 @@ function buildOpenAiMessages(payload) {
     `Assistant response: ${payload.response || ""}`
   ].join("\n");
 
+  return {
+    systemPrompt,
+    userPrompt
+  };
+}
+
+function buildOpenAiMessages(payload) {
+  const { systemPrompt, userPrompt } = buildAnalysisPromptParts(payload);
+
   return [
     {
       role: "system",
@@ -321,6 +343,19 @@ function buildOpenAiMessages(payload) {
       content: userPrompt
     }
   ];
+}
+
+function buildAnthropicMessages(payload) {
+  const { systemPrompt, userPrompt } = buildAnalysisPromptParts(payload);
+  return {
+    system: systemPrompt,
+    messages: [
+      {
+        role: "user",
+        content: userPrompt
+      }
+    ]
+  };
 }
 
 function extractOpenAiTextResponse(response) {
@@ -347,6 +382,21 @@ function extractOllamaTextResponse(response) {
   const text = response && response.message && typeof response.message.content === "string" ? response.message.content : "";
   if (!text.trim()) {
     throw new Error("Ollama response did not contain message content.");
+  }
+
+  return text;
+}
+
+function extractAnthropicTextResponse(response) {
+  const content = Array.isArray(response && response.content) ? response.content : [];
+  const text = content
+    .filter((block) => block && block.type === "text" && typeof block.text === "string" && block.text.trim())
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+
+  if (!text) {
+    throw new Error("Anthropic response did not contain text content.");
   }
 
   return text;
@@ -820,7 +870,7 @@ async function callOpenAiAnalysis(payload, config, trace = null) {
     conversationId: payload.conversationId || null
   });
 
-  const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
+  const response = await fetchWithTimeout(OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -868,6 +918,81 @@ async function callOpenAiAnalysis(payload, config, trace = null) {
       rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
     });
   }
+  return normalized;
+}
+
+async function callAnthropicAnalysis(payload, config, trace = null) {
+  if (!config.anthropicApiKey) {
+    throw new Error("Anthropic API key is missing. Add it in the extension popup.");
+  }
+
+  const promptParts = buildAnthropicMessages(payload);
+  const requestBody = {
+    model: config.anthropicModel || DEFAULT_API_CONFIG.anthropicModel,
+    system: promptParts.system,
+    messages: promptParts.messages,
+    max_tokens: 700
+  };
+
+  const startedAtMs = nowMs();
+  logEvent("info", "Sending Anthropic analysis request", {
+    requestId: trace ? trace.requestId : null,
+    model: requestBody.model,
+    conversationId: payload.conversationId || null
+  });
+
+  const response = await fetchWithTimeout(ANTHROPIC_MESSAGES_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": config.anthropicApiKey,
+      "anthropic-version": ANTHROPIC_API_VERSION
+    },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Anthropic API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+  }
+
+  const rawResponse = await response.json();
+  const rawText = extractAnthropicTextResponse(rawResponse);
+  logEvent("info", "Received Anthropic analysis response", {
+    requestId: trace ? trace.requestId : null,
+    model: requestBody.model,
+    httpStatus: response.status,
+    latencyMs: elapsedMs(startedAtMs),
+    responseChars: rawText.length
+  });
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    throw new Error(
+      `Anthropic returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`
+    );
+  }
+
+  logEvent("info", "Anthropic analysis raw payload", {
+    requestId: trace ? trace.requestId : null,
+    model: requestBody.model,
+    rawPayloadJson: safeJsonStringify(parsed),
+    rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
+  });
+
+  const normalized = normalizeAnalysisResponse(parsed, payload);
+  if (config.identifySpans !== false && normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
+    logEvent("warn", "Anthropic analysis returned issues without evidence spans", {
+      requestId: trace ? trace.requestId : null,
+      model: requestBody.model,
+      source: normalized.source,
+      rawPayloadJson: safeJsonStringify(parsed),
+      rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
+    });
+  }
+
   return normalized;
 }
 
@@ -968,7 +1093,7 @@ async function testOpenAiConnection(config) {
     model: requestBody.model
   });
 
-  const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
+  const response = await fetchWithTimeout(OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1000,6 +1125,64 @@ async function testOpenAiConnection(config) {
     }
   };
   logEvent("info", "OpenAI connection test succeeded", result.details);
+  return result;
+}
+
+async function testAnthropicConnection(config) {
+  if (!config.anthropicApiKey) {
+    throw new Error("Anthropic API key is missing. Add it in the extension popup.");
+  }
+
+  const requestBody = {
+    model: config.anthropicModel || DEFAULT_API_CONFIG.anthropicModel,
+    system: "Reply with JSON only.",
+    messages: [
+      {
+        role: "user",
+        content: 'Reply with JSON only: {"ok": true}'
+      }
+    ],
+    max_tokens: 40
+  };
+
+  const startedAtMs = nowMs();
+  logEvent("info", "Sending Anthropic connection test", {
+    model: requestBody.model
+  });
+
+  const response = await fetchWithTimeout(ANTHROPIC_MESSAGES_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": config.anthropicApiKey,
+      "anthropic-version": ANTHROPIC_API_VERSION
+    },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Anthropic API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+  }
+
+  const rawResponse = await response.json();
+  const rawText = extractAnthropicTextResponse(rawResponse);
+  try {
+    JSON.parse(rawText);
+  } catch (error) {
+    throw new Error(`Anthropic returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
+  }
+
+  const result = {
+    provider: "anthropic",
+    message: `Anthropic responded successfully with model ${requestBody.model}.`,
+    details: {
+      model: requestBody.model,
+      latencyMs: elapsedMs(startedAtMs),
+      responseChars: rawText.length
+    }
+  };
+  logEvent("info", "Anthropic connection test succeeded", result.details);
   return result;
 }
 
@@ -1142,31 +1325,25 @@ async function testOllamaConnection(config) {
 async function testProviderConnection(configOverride) {
   const storedConfig = await getStoredApiConfig();
   const config = buildApiConfig(configOverride || {}, storedConfig);
+  const provider = normalizeProviderName(config.provider);
   logEvent("info", "Starting analysis provider connection test", {
-    provider: config.provider
+    provider
   });
 
   try {
-    if (config.provider === "local") {
-      return await testLocalEndpointConnection(config);
-    }
-
-    if (config.provider === "ollama") {
-      return await testOllamaConnection(config);
-    }
-
-    return await testOpenAiConnection(config);
+    return await getProviderAdapter(provider).testConnection(config);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown connection test error";
-    throw new Error(`[${config.provider}] ${message}`);
+    throw new Error(`[${provider}] ${message}`);
   }
 }
 
 async function analyzeLatestTurn(payload, trace = null) {
   const config = await getStoredApiConfig();
+  const provider = normalizeProviderName(config.provider);
   logEvent("info", "Starting analysis execution", {
     requestId: trace ? trace.requestId : null,
-    provider: config.provider,
+    provider,
     enabled: config.enabled,
     conversationId: payload && payload.conversationId ? payload.conversationId : null
   });
@@ -1183,21 +1360,15 @@ async function analyzeLatestTurn(payload, trace = null) {
 
   let result;
   try {
-    if (config.provider === "local") {
-      result = await callLocalEndpointAnalysis(payload, config, trace);
-    } else if (config.provider === "ollama") {
-      result = await callOllamaAnalysis(payload, config, trace);
-    } else {
-      result = await callOpenAiAnalysis(payload, config, trace);
-    }
+    result = await getProviderAdapter(provider).analyze(payload, config, trace);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown analysis error";
     logEvent("error", "Analysis execution failed before a result was returned", {
       requestId: trace ? trace.requestId : null,
-      provider: config.provider,
+      provider,
       error: message
     });
-    throw new Error(`[${config.provider}] ${message}`);
+    throw new Error(`[${provider}] ${message}`);
   }
 
   if (result.issueDetected) {
@@ -1230,6 +1401,49 @@ async function analyzeLatestTurn(payload, trace = null) {
     ...result,
     spansEnabled: true
   };
+}
+
+const PROVIDER_ADAPTERS = {
+  openai: {
+    id: "openai",
+    label: "Direct OpenAI",
+    settingsSections: ["openai"],
+    analyze: callOpenAiAnalysis,
+    testConnection: testOpenAiConnection
+  },
+  anthropic: {
+    id: "anthropic",
+    label: "Direct Anthropic",
+    settingsSections: ["anthropic"],
+    analyze: callAnthropicAnalysis,
+    testConnection: testAnthropicConnection
+  },
+  local: {
+    id: "local",
+    label: "Local endpoint",
+    settingsSections: ["local"],
+    analyze: callLocalEndpointAnalysis,
+    testConnection: testLocalEndpointConnection
+  },
+  ollama: {
+    id: "ollama",
+    label: "Ollama (local model)",
+    settingsSections: ["ollama"],
+    analyze: callOllamaAnalysis,
+    testConnection: testOllamaConnection
+  }
+};
+
+function getProviderAdapter(provider) {
+  return PROVIDER_ADAPTERS[normalizeProviderName(provider)] || PROVIDER_ADAPTERS.openai;
+}
+
+function getProviderDefinitions() {
+  return Object.values(PROVIDER_ADAPTERS).map((provider) => ({
+    id: provider.id,
+    label: provider.label,
+    settingsSections: Array.isArray(provider.settingsSections) ? provider.settingsSections : []
+  }));
 }
 
 function getOrCreateAnalysisRequest(payload) {
@@ -1306,6 +1520,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
     });
     return true;
+  }
+
+  if (message.type === "SAFETY_NUDGES_GET_PROVIDER_DEFINITIONS") {
+    sendResponse({
+      ok: true,
+      providers: getProviderDefinitions()
+    });
+    return false;
   }
 
   if (message.type === "SAFETY_NUDGES_SET_API_CONFIG") {
