@@ -27,7 +27,8 @@ const state = {
   payloadByFingerprint: new Map(),
   outsideClickInstalled: false,
   viewportListenersInstalled: false,
-  extensionRecoveryAttempted: false
+  extensionRecoveryAttempted: false,
+  analysisEnabled: true
 };
 
 function isLocalFixtureHost() {
@@ -448,6 +449,28 @@ function getLatestPromptResponsePair() {
 function getConversationId() {
   const adapter = getActiveSurfaceAdapter();
   return adapter ? adapter.getConversationId() : null;
+}
+
+function applyStoredAnalysisConfig(config) {
+  if (!config || typeof config !== "object") {
+    return;
+  }
+
+  state.analysisEnabled = Boolean(config.enabled);
+}
+
+function loadStoredAnalysisConfig() {
+  try {
+    chrome.storage.local.get(["analysisApi"], (stored) => {
+      if (chrome.runtime.lastError) {
+        return;
+      }
+
+      applyStoredAnalysisConfig(stored.analysisApi || null);
+    });
+  } catch (_error) {
+    // Ignore storage failures and keep the default enabled state.
+  }
 }
 
 function nowMs() {
@@ -1981,6 +2004,10 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
 }
 
 async function maybeAnalyzeLatestTurn() {
+  if (!state.analysisEnabled) {
+    return;
+  }
+
   if (isGenerationInProgress()) {
     return;
   }
@@ -2224,6 +2251,15 @@ function installShell() {
 
   installOutsideClickHandler();
   installViewportListeners();
+  loadStoredAnalysisConfig();
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes.analysisApi) {
+      return;
+    }
+
+    applyStoredAnalysisConfig(changes.analysisApi.newValue || null);
+  });
 
   chrome.runtime.sendMessage(
     {

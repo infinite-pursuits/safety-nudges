@@ -5,92 +5,219 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Safety Nudges</title>
     <style>
+      :root {
+        color-scheme: light;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: #f7f4ee;
+        color: #1f2937;
+      }
+
       body {
         margin: 0;
-        min-width: 280px;
-        padding: 16px;
-        font-family: ui-sans-serif, system-ui, sans-serif;
-        background: #f8fafc;
-        color: #0f172a;
+        min-width: 340px;
+        max-width: 340px;
+        background: linear-gradient(180deg, #fbf8f3 0%, #f2ede4 100%);
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      .shell {
+        padding: 18px 18px 16px;
+      }
+
+      .screen[hidden] {
+        display: none;
+      }
+
+      h1,
+      h2 {
+        margin: 0;
       }
 
       h1 {
-        margin: 0;
+        font-size: 20px;
+        line-height: 1.1;
+      }
+
+      h2 {
         font-size: 16px;
       }
 
       p {
-        margin: 8px 0 0;
+        margin: 0;
         font-size: 13px;
         line-height: 1.45;
       }
 
-      label,
-      select,
-      button {
-        display: block;
-        width: 100%;
-        margin-top: 12px;
-        font-size: 12px;
-        font-weight: 600;
-      }
-
-      input[type="url"],
-      input[type="password"],
-      input[type="text"],
-      select {
-        box-sizing: border-box;
-        width: 100%;
-        margin-top: 6px;
-        padding: 8px 10px;
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        font-size: 12px;
-      }
-
-      .checkbox-row {
-        display: flex;
-        align-items: center;
+      .intro {
+        display: grid;
         gap: 8px;
-        margin-top: 12px;
-        font-size: 12px;
-        font-weight: 600;
       }
 
-      .checkbox-row input {
-        margin: 0;
+      .muted {
+        color: #5b6472;
       }
 
-      button {
+      .tiny {
+        font-size: 11px;
+        color: #6b7280;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .screen {
+        display: grid;
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      .card {
+        display: grid;
+        gap: 10px;
+        padding: 14px;
+        border: 1px solid rgba(115, 127, 146, 0.18);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.8);
+        box-shadow: 0 10px 30px rgba(35, 29, 20, 0.06);
+      }
+
+      .choice-button,
+      .action-button,
+      .toggle-button {
+        width: 100%;
         border: 0;
-        border-radius: 8px;
-        padding: 10px 12px;
-        background: #0f172a;
-        color: #f8fafc;
+        border-radius: 12px;
         cursor: pointer;
       }
 
-      code {
-        font-size: 12px;
+      .choice-button,
+      .action-button {
+        padding: 11px 12px;
+        background: #1f2937;
+        color: #fffdf9;
+        font-weight: 700;
       }
 
-      .section-title {
-        margin-top: 16px;
+      .choice-button.secondary,
+      .action-button.secondary {
+        background: #e7e1d6;
+        color: #1f2937;
+      }
+
+      .toggle-button {
+        padding: 14px 16px;
+        background: #1f2937;
+        color: #fffdf9;
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+      }
+
+      .toggle-button[data-enabled="false"] {
+        background: #9a3412;
+      }
+
+      .text-link {
+        border: 0;
+        background: transparent;
+        padding: 0;
+        color: #1f2937;
+        text-decoration: underline;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field label {
         font-size: 12px;
         font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: #475569;
+      }
+
+      .field input {
+        box-sizing: border-box;
+        width: 100%;
+        border: 1px solid #c8cfda;
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: #fff;
+      }
+
+      .provider-group {
+        display: grid;
+        gap: 10px;
+      }
+
+      .provider-option {
+        display: grid;
+        grid-template-columns: 18px 1fr;
+        gap: 10px;
+        align-items: start;
+        padding: 10px 12px;
+        border: 1px solid #d9ddc7;
+        border-radius: 12px;
+        background: #fffdf9;
+      }
+
+      .provider-option input {
+        margin-top: 2px;
+      }
+
+      .provider-option strong {
+        display: block;
+        font-size: 13px;
+      }
+
+      .status-line {
+        min-height: 18px;
+        font-size: 12px;
+        color: #334155;
+      }
+
+      .status-line[data-tone="success"] {
+        color: #166534;
+      }
+
+      .status-line[data-tone="error"] {
+        color: #b91c1c;
+      }
+
+      .status-line[data-tone="muted"] {
+        color: #6b7280;
+      }
+
+      .header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .back-button {
+        border: 0;
+        background: transparent;
+        color: #1f2937;
+        cursor: pointer;
+        font-weight: 700;
+        padding: 0;
       }
 
       #activity-log {
-        margin-top: 8px;
         max-height: 180px;
         overflow: auto;
         padding: 10px;
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        background: #ffffff;
+        border: 1px solid #d7d9de;
+        border-radius: 12px;
+        background: #fff;
         font-size: 11px;
         line-height: 1.4;
         white-space: pre-wrap;
@@ -98,53 +225,104 @@
     </style>
   </head>
   <body>
-    <h1>Safety Nudges</h1>
-    <p id="status">Checking extension status...</p>
-    <p>The current shell only runs on <code>chatgpt.com</code> and <code>chat.openai.com</code>.</p>
-    <label for="provider">Analysis provider</label>
-    <select id="provider">
-      <option value="openai">Direct OpenAI</option>
-      <option value="anthropic">Direct Anthropic</option>
-      <option value="ollama">Ollama (local model)</option>
-      <option value="local">Local endpoint</option>
-    </select>
-    <div data-provider-section="openai">
-      <label for="openai-key">OpenAI API key</label>
-      <input id="openai-key" type="password" placeholder="sk-...">
-      <p>The key is stored only in this extension's local Chrome storage on your machine.</p>
-      <label for="openai-model">OpenAI model</label>
-      <input id="openai-model" type="text" placeholder="gpt-5-mini">
+    <div class="shell">
+      <div class="intro">
+        <h1>Safety Nudges</h1>
+        <p>Safety Nudges provides real-time auditing of chatbot conversations to screen for common problems. Available on <code>chatgpt.com</code> and <code>claude.ai</code>.</p>
+        <p id="save-status" class="tiny">Loading settings...</p>
+      </div>
+
+      <div id="onboarding-screen" class="screen" hidden>
+        <div class="card">
+          <h2>Choose setup</h2>
+          <p class="muted">Basic setup uses a key we provide. Advanced setup lets you paste your own API keys.</p>
+          <button id="choose-basic-setup" class="choice-button" type="button">Basic setup</button>
+          <button id="choose-advanced-setup" class="choice-button secondary" type="button">Advanced setup</button>
+        </div>
+
+        <div id="basic-setup-card" class="card" hidden>
+          <div class="field">
+            <label for="managed-key">Provided setup key</label>
+            <input id="managed-key" type="password" placeholder="sn-alpha-placeholder-...">
+          </div>
+          <p class="tiny">Paste the key we provided to you. Real provider activation is still a placeholder in this build.</p>
+          <button id="complete-basic-setup" class="action-button" type="button">Continue</button>
+        </div>
+      </div>
+
+      <div id="main-screen" class="screen" hidden>
+        <div class="card stack">
+          <div class="stack">
+            <h2>Select provider</h2>
+            <div id="provider-group" class="provider-group">
+              <label class="provider-option" for="provider-openai">
+                <input id="provider-openai" type="radio" name="provider-selection" value="openai">
+                <span>
+                  <strong>OpenAI</strong>
+                </span>
+              </label>
+              <label class="provider-option" for="provider-anthropic">
+                <input id="provider-anthropic" type="radio" name="provider-selection" value="anthropic">
+                <span>
+                  <strong>Anthropic</strong>
+                </span>
+              </label>
+              <label class="provider-option" for="provider-complementary">
+                <input id="provider-complementary" type="radio" name="provider-selection" value="complementary">
+                <span>
+                  <strong>Complementary provider</strong>
+                  <span class="tiny">Use OpenAI on claude.ai and Anthropic on chatgpt.com.</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="stack">
+            <button id="test-connection" class="action-button secondary" type="button">Test connection</button>
+            <p id="connection-status" class="status-line" data-tone="muted">No connection test run yet.</p>
+          </div>
+
+          <button id="toggle-enabled" class="toggle-button" type="button" data-enabled="true">Pause Safety Nudges</button>
+          <p id="toggle-description" class="tiny">Safety Nudges is currently watching supported chat pages.</p>
+        </div>
+
+        <button id="open-advanced-settings" class="text-link" type="button">Advanced settings</button>
+      </div>
+
+      <div id="advanced-screen" class="screen" hidden>
+        <div class="header-row">
+          <h2>Advanced settings</h2>
+          <button id="close-advanced-settings" class="back-button" type="button">Back</button>
+        </div>
+
+        <div class="card stack">
+          <div class="field">
+            <label for="openai-key">OpenAI API key</label>
+            <input id="openai-key" type="password" placeholder="sk-...">
+          </div>
+          <div class="field">
+            <label for="openai-model">OpenAI model</label>
+            <input id="openai-model" type="text" placeholder="gpt-5-mini">
+          </div>
+        </div>
+
+        <div class="card stack">
+          <div class="field">
+            <label for="anthropic-key">Anthropic API key</label>
+            <input id="anthropic-key" type="password" placeholder="sk-ant-...">
+          </div>
+          <div class="field">
+            <label for="anthropic-model">Anthropic model</label>
+            <input id="anthropic-model" type="text" placeholder="claude-sonnet-4-6">
+          </div>
+        </div>
+
+        <div class="card stack">
+          <h2>Recent activity</h2>
+          <div id="activity-log">Loading activity...</div>
+        </div>
+      </div>
     </div>
-    <div data-provider-section="anthropic">
-      <label for="anthropic-key">Anthropic API key</label>
-      <input id="anthropic-key" type="password" placeholder="sk-ant-...">
-      <p>The Anthropic key is also stored only in this extension's local Chrome storage on your machine.</p>
-      <label for="anthropic-model">Anthropic model</label>
-      <input id="anthropic-model" type="text" placeholder="claude-sonnet-4-6">
-    </div>
-    <div data-provider-section="ollama">
-      <label for="ollama-endpoint">Ollama chat endpoint</label>
-      <input id="ollama-endpoint" type="url" placeholder="http://127.0.0.1:11434/api/chat">
-      <label for="ollama-model">Ollama model</label>
-      <input id="ollama-model" type="text" placeholder="llama3.1:8b">
-      <p>For local Ollama, make sure the model is already pulled and the Ollama server is running.</p>
-    </div>
-    <div data-provider-section="local">
-      <label for="endpoint">Custom analysis endpoint</label>
-      <input id="endpoint" type="url" placeholder="http://127.0.0.1:8787/analyze">
-    </div>
-    <label class="checkbox-row" for="enabled">
-      <input id="enabled" type="checkbox" checked>
-      Enable live analysis requests
-    </label>
-    <label class="checkbox-row" for="identify-spans">
-      <input id="identify-spans" type="checkbox" checked>
-      Identify inline spans
-    </label>
-    <button id="save" type="button">Save settings</button>
-    <button id="test-connection" type="button">Test connection</button>
-    <p class="section-title">Recent activity</p>
-    <div id="activity-log">Loading activity...</div>
     <script src="popup.js"></script>
   </body>
-  </html>
+</html>

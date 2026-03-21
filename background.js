@@ -11,6 +11,9 @@ const DEFAULT_API_CONFIG = {
   ollamaEndpoint: "http://127.0.0.1:11434/api/chat",
   enabled: true,
   identifySpans: true,
+  setupMode: "advanced",
+  onboardingComplete: false,
+  managedAccessKey: "",
   openAiApiKey: "",
   openAiModel: "gpt-5-mini",
   anthropicApiKey: "",
@@ -211,6 +214,17 @@ function getStoredApiConfig() {
         ...DEFAULT_API_CONFIG,
         ...(stored.analysisApi || {})
       };
+      if (!merged.onboardingComplete) {
+        const hasLegacySetup =
+          Boolean(merged.openAiApiKey) ||
+          Boolean(merged.anthropicApiKey) ||
+          merged.provider === "local" ||
+          merged.provider === "ollama";
+        if (hasLegacySetup) {
+          merged.onboardingComplete = true;
+          merged.setupMode = merged.setupMode || "advanced";
+        }
+      }
       resolve(merged);
     });
   });
@@ -218,12 +232,21 @@ function getStoredApiConfig() {
 
 function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
   return {
-    provider: normalizeProviderName(config.provider),
+    provider: normalizeProviderSelection(config.provider || existing.provider),
     endpoint: config.endpoint || existing.endpoint || DEFAULT_API_CONFIG.endpoint,
     ollamaEndpoint:
       config.ollamaEndpoint || existing.ollamaEndpoint || DEFAULT_API_CONFIG.ollamaEndpoint,
     enabled: Boolean(config.enabled),
     identifySpans: config.identifySpans !== false,
+    setupMode: normalizeSetupMode(config.setupMode || existing.setupMode),
+    onboardingComplete:
+      typeof config.onboardingComplete === "boolean"
+        ? config.onboardingComplete
+        : Boolean(existing.onboardingComplete),
+    managedAccessKey:
+      typeof config.managedAccessKey === "string"
+        ? config.managedAccessKey.trim()
+        : existing.managedAccessKey || DEFAULT_API_CONFIG.managedAccessKey,
     openAiApiKey:
       typeof config.openAiApiKey === "string" && config.openAiApiKey.trim()
         ? config.openAiApiKey.trim()
@@ -256,13 +279,16 @@ function setStoredApiConfig(config) {
             provider: nextConfig.provider,
             enabled: nextConfig.enabled,
             identifySpans: nextConfig.identifySpans,
+            setupMode: nextConfig.setupMode,
+            onboardingComplete: nextConfig.onboardingComplete,
             openAiModel: nextConfig.openAiModel,
             anthropicModel: nextConfig.anthropicModel,
             ollamaModel: nextConfig.ollamaModel,
             localEndpoint: nextConfig.endpoint,
             ollamaEndpoint: nextConfig.ollamaEndpoint,
             hasOpenAiKey: Boolean(nextConfig.openAiApiKey),
-            hasAnthropicKey: Boolean(nextConfig.anthropicApiKey)
+            hasAnthropicKey: Boolean(nextConfig.anthropicApiKey),
+            hasManagedAccessKey: Boolean(nextConfig.managedAccessKey)
           });
           resolve();
         }
@@ -297,6 +323,135 @@ function buildAnalysisRequest(payload) {
 
 function normalizeProviderName(value) {
   return value === "local" || value === "ollama" || value === "anthropic" ? value : "openai";
+}
+
+function normalizeProviderSelection(value) {
+  if (value === "anthropic" || value === "local" || value === "ollama" || value === "complementary") {
+    return value;
+  }
+  return "openai";
+}
+
+function normalizeSetupMode(value) {
+  return value === "basic" ? "basic" : "advanced";
+}
+
+function getHostnameFromPageUrl(pageUrl) {
+  if (typeof pageUrl !== "string" || !pageUrl.trim()) {
+    return "";
+  }
+
+  try {
+    return new URL(pageUrl).hostname.toLowerCase();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function resolveProviderForPayload(config, payload = null) {
+  const selection = normalizeProviderSelection(config && config.provider ? config.provider : DEFAULT_API_CONFIG.provider);
+  if (selection !== "complementary") {
+    return normalizeProviderName(selection);
+  }
+
+  const hostname = getHostnameFromPageUrl(payload && payload.pageUrl ? payload.pageUrl : "");
+  if (hostname === "claude.ai") {
+    return "openai";
+  }
+  if (hostname === "chatgpt.com" || hostname === "chat.openai.com") {
+    return "anthropic";
+  }
+  return "openai";
+}
+
+function buildFriendlyConnectionResult(ok, message, details = null, reasonCode = "generic") {
+  return {
+    ok,
+    message,
+    details,
+    reasonCode
+  };
+}
+
+function classifyConnectionFailure(errorMessage) {
+  const normalized = (errorMessage || "").toLowerCase();
+  if (!normalized) {
+    return buildFriendlyConnectionResult(false, "Connection test failed. Something went wrong.", null, "generic");
+  }
+
+  if (
+    normalized.includes("quota") ||
+    normalized.includes("insufficient_quota") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("429")
+  ) {
+    return buildFriendlyConnectionResult(
+      false,
+      "Connection test failed. This provider account has no quota available right now.",
+      null,
+      "quota_exceeded"
+    );
+  }
+
+  if (
+    normalized.includes("incorrect api key") ||
+    normalized.includes("invalid api key") ||
+    normalized.includes("authentication") ||
+    normalized.includes("401") ||
+    normalized.includes("unauthorized")
+  ) {
+    return buildFriendlyConnectionResult(
+      false,
+      "Connection test failed. The API key looks incorrect.",
+      null,
+      "incorrect_key"
+    );
+  }
+
+  if (normalized.includes("missing")) {
+    return buildFriendlyConnectionResult(
+      false,
+      "Connection test failed. A required key or setting is missing.",
+      null,
+      "missing_credentials"
+    );
+  }
+
+  if (normalized.includes("setup key") || normalized.includes("activation key")) {
+    return buildFriendlyConnectionResult(
+      false,
+      "Connection test failed. We could not verify that setup key.",
+      null,
+      "invalid_setup_key"
+    );
+  }
+
+  return buildFriendlyConnectionResult(
+    false,
+    "Connection test failed. The provider did not accept this request.",
+    null,
+    "generic"
+  );
+}
+
+async function testManagedActivationConnection(config) {
+  const accessKey = typeof config.managedAccessKey === "string" ? config.managedAccessKey.trim() : "";
+  if (!accessKey) {
+    throw new Error("Setup key is missing. Paste the key we provided to you.");
+  }
+
+  if (accessKey.startsWith("sn-alpha-placeholder-") || accessKey.startsWith("sn-alpha-demo-")) {
+    const result = buildFriendlyConnectionResult(
+      true,
+      "Connection test succeeded. This placeholder setup key was accepted.",
+      { mode: "placeholder-managed-access" },
+      "placeholder_success"
+    );
+    logEvent("info", "Managed setup key placeholder accepted", result.details);
+    return result;
+  }
+
+  throw new Error("Setup key could not be verified.");
 }
 
 function buildAnalysisPromptParts(payload) {
@@ -1325,25 +1480,57 @@ async function testOllamaConnection(config) {
 async function testProviderConnection(configOverride) {
   const storedConfig = await getStoredApiConfig();
   const config = buildApiConfig(configOverride || {}, storedConfig);
-  const provider = normalizeProviderName(config.provider);
+  const setupMode = normalizeSetupMode(config.setupMode);
+  if (setupMode === "basic") {
+    return await testManagedActivationConnection(config);
+  }
+
+  if (normalizeProviderSelection(config.provider) === "complementary") {
+    const openAiResult = await testOpenAiConnection({
+      ...config,
+      provider: "openai"
+    });
+    const anthropicResult = await testAnthropicConnection({
+      ...config,
+      provider: "anthropic"
+    });
+    const result = buildFriendlyConnectionResult(
+      true,
+      "Connection test succeeded. OpenAI and Anthropic are both ready.",
+      {
+        openai: openAiResult.details || null,
+        anthropic: anthropicResult.details || null
+      },
+      "complementary_success"
+    );
+    logEvent("info", "Complementary provider connection test succeeded", result.details);
+    return result;
+  }
+
+  const provider = resolveProviderForPayload(config, null);
   logEvent("info", "Starting analysis provider connection test", {
     provider
   });
 
   try {
-    return await getProviderAdapter(provider).testConnection(config);
+    const rawResult = await getProviderAdapter(provider).testConnection({
+      ...config,
+      provider
+    });
+    return buildFriendlyConnectionResult(true, rawResult.message || "Connection test succeeded.", rawResult.details || null);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown connection test error";
-    throw new Error(`[${provider}] ${message}`);
+    throw new Error(message);
   }
 }
 
 async function analyzeLatestTurn(payload, trace = null) {
   const config = await getStoredApiConfig();
-  const provider = normalizeProviderName(config.provider);
+  const provider = resolveProviderForPayload(config, payload);
   logEvent("info", "Starting analysis execution", {
     requestId: trace ? trace.requestId : null,
     provider,
+    providerSelection: normalizeProviderSelection(config.provider),
     enabled: config.enabled,
     conversationId: payload && payload.conversationId ? payload.conversationId : null
   });
@@ -1406,14 +1593,14 @@ async function analyzeLatestTurn(payload, trace = null) {
 const PROVIDER_ADAPTERS = {
   openai: {
     id: "openai",
-    label: "Direct OpenAI",
+    label: "OpenAI",
     settingsSections: ["openai"],
     analyze: callOpenAiAnalysis,
     testConnection: testOpenAiConnection
   },
   anthropic: {
     id: "anthropic",
-    label: "Direct Anthropic",
+    label: "Anthropic",
     settingsSections: ["anthropic"],
     analyze: callAnthropicAnalysis,
     testConnection: testAnthropicConnection
@@ -1439,11 +1626,23 @@ function getProviderAdapter(provider) {
 }
 
 function getProviderDefinitions() {
-  return Object.values(PROVIDER_ADAPTERS).map((provider) => ({
-    id: provider.id,
-    label: provider.label,
-    settingsSections: Array.isArray(provider.settingsSections) ? provider.settingsSections : []
-  }));
+  return [
+    {
+      id: "openai",
+      label: "OpenAI",
+      settingsSections: ["openai"]
+    },
+    {
+      id: "anthropic",
+      label: "Anthropic",
+      settingsSections: ["anthropic"]
+    },
+    {
+      id: "complementary",
+      label: "Complementary provider",
+      settingsSections: ["openai", "anthropic"]
+    }
+  ];
 }
 
 function getOrCreateAnalysisRequest(payload) {
@@ -1548,12 +1747,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
       })
       .catch((error) => {
+        const failure = classifyConnectionFailure(error instanceof Error ? error.message : "Unknown connection test error");
         logEvent("error", "Connection test failed", {
           error: error instanceof Error ? error.message : "Unknown connection test error"
         });
         sendResponse({
           ok: false,
-          error: error instanceof Error ? error.message : "Unknown connection test error"
+          error: error instanceof Error ? error.message : "Unknown connection test error",
+          result: failure
         });
       });
     return true;

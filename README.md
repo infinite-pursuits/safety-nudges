@@ -8,23 +8,30 @@ What is implemented:
 - A content script with host adapters for ChatGPT-style and Claude-style DOMs that waits for a quiet period after mutations and extracts the latest user prompt plus assistant response.
 - A small lower-right in-page nudge that stays hidden unless an issue is detected (or debug mode is enabled).
 - A judgments-panel feedback flow with thumbs up/down, an optional short comment, inline consent copy, and direct Supabase persistence for submitted feedback.
-- A popup that lets you store your OpenAI or Anthropic API key locally inside the extension, switch providers, configure an Ollama model, and watch a live activity log.
+- A popup redesigned around nontechnical use: first-run basic vs advanced setup, a simple provider selector, a prominent play/pause control, and an advanced screen for manual OpenAI/Anthropic keys and logs.
 
 Testing visibility:
 - The background service worker logs request start, response receipt, latency, provider-specific metadata, no-issue completions, issue detections, and failures to the extension console.
 - The popup shows the same recent activity log so you can confirm the flow worked even when no issue was detected.
 
 Using Anthropic:
-- Paste an Anthropic API key into the popup and choose `Direct Anthropic`.
+- Open `Advanced settings`, paste an Anthropic API key, then choose `Anthropic` from the main provider selector.
 - The extension uses Anthropic's Messages API and expects the model to return JSON matching the Step 1 issue schema.
 - Manual Anthropic key entry should remain available even if the future alpha onboarding flow provisions managed credentials through Supabase Edge Functions.
+
+Using the popup:
+- On first run, users choose between `Basic setup` and `Advanced setup`.
+- `Basic setup` accepts a provided setup key. In the current build this verification is still a placeholder and is tracked by `safety-nudges-6wp.2.1` and `safety-nudges-6wp.2.2`.
+- `Advanced setup` keeps manual OpenAI and Anthropic API key entry available.
+- After setup, the main screen exposes only three provider choices: `OpenAI`, `Anthropic`, and `Complementary provider` (`OpenAI` on `claude.ai`, `Anthropic` on `chatgpt.com`).
+- Settings save automatically when changed.
+- The prominent play/pause button controls whether the extension analyzes anything at all. When paused, the content script should not show a transient `Checking response...` state.
 
 Using Ollama:
 - Install and run Ollama locally so the default API is available at `http://127.0.0.1:11434/api/chat`.
 - Pull a local model first, for example `ollama pull llama3.1:8b`.
 - If you use the extension's direct `Ollama (local model)` provider, Ollama must allow the extension origin. Start it with `OLLAMA_ORIGINS="chrome-extension://*"` (or your exact extension origin) before loading the extension.
-- To avoid changing Ollama's origin settings, run the local bridge in this repo and choose `Local endpoint` instead. That mirrors Rescriber's architecture: the extension talks to a local app server, and the server talks to Ollama.
-- In the extension popup, choose `Ollama (local model)`, keep the default endpoint unless your setup differs, and set the installed model name.
+- To avoid changing Ollama's origin settings, run the local bridge in this repo and configure the extension through the background-message helpers or harness rather than the default popup. That mirrors Rescriber's architecture: the extension talks to a local app server, and the server talks to Ollama.
 - The extension sends a non-streaming chat request with `format: "json"` and expects the model to return JSON in `message.content`.
 
 Running the local bridge:
@@ -32,7 +39,7 @@ Running the local bridge:
 - Activate it: `source .venv/bin/activate`
 - Install dependencies: `python -m pip install -r requirements.txt`
 - Start the bridge: `python -m safety_nudges.extension.ollama_bridge`
-- In the extension popup, choose `Local endpoint` and use `http://127.0.0.1:8787/analyze`
+- For developer-only local endpoint tests, set the provider through the harness/runtime helpers and use `http://127.0.0.1:8787/analyze`
 
 What is intentionally stubbed:
 - Hardening the host-adapter selectors against large upstream DOM churn beyond the current ChatGPT/Claude baseline heuristics.
