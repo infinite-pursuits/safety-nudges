@@ -211,6 +211,11 @@
         padding: 0;
       }
 
+      .screen-title {
+        display: grid;
+        gap: 6px;
+      }
+
       #activity-log {
         max-height: 180px;
         overflow: auto;
@@ -229,7 +234,6 @@
       <div class="intro">
         <h1>Safety Nudges</h1>
         <p>Safety Nudges provides real-time auditing of chatbot conversations to screen for common problems. Available on <code>chatgpt.com</code> and <code>claude.ai</code>.</p>
-        <p id="save-status" class="tiny">Loading settings...</p>
       </div>
 
       <div id="onboarding-screen" class="screen" hidden>
@@ -239,8 +243,14 @@
           <button id="choose-basic-setup" class="choice-button" type="button">Basic setup</button>
           <button id="choose-advanced-setup" class="choice-button secondary" type="button">Advanced setup</button>
         </div>
+      </div>
 
-        <div id="basic-setup-card" class="card" hidden>
+      <div id="basic-setup-screen" class="screen" hidden>
+        <div class="header-row">
+          <h2>Basic setup</h2>
+          <button id="back-to-onboarding" class="back-button" type="button">Back</button>
+        </div>
+        <div class="card">
           <div class="field">
             <label for="managed-key">Provided setup key</label>
             <input id="managed-key" type="password" placeholder="sn-alpha-placeholder-...">
@@ -293,6 +303,17 @@
         <div class="header-row">
           <h2>Advanced settings</h2>
           <button id="close-advanced-settings" class="back-button" type="button">Back</button>
+        </div>
+
+        <div class="card stack">
+          <div class="screen-title">
+            <h2>Basic setup key</h2>
+            <p class="tiny">If you were given a setup key, you can paste or replace it here later.</p>
+          </div>
+          <div class="field">
+            <label for="managed-key-advanced">Provided setup key</label>
+            <input id="managed-key-advanced" type="password" placeholder="sn-alpha-placeholder-...">
+          </div>
         </div>
 
         <div class="card stack">

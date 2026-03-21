@@ -12,15 +12,16 @@ const DEFAULT_CONFIG = {
 
 const AUTO_SAVE_DELAY_MS = 250;
 
-const saveStatusNode = document.getElementById("save-status");
 const onboardingScreenNode = document.getElementById("onboarding-screen");
+const basicSetupScreenNode = document.getElementById("basic-setup-screen");
 const mainScreenNode = document.getElementById("main-screen");
 const advancedScreenNode = document.getElementById("advanced-screen");
-const basicSetupCardNode = document.getElementById("basic-setup-card");
 const chooseBasicSetupButton = document.getElementById("choose-basic-setup");
 const chooseAdvancedSetupButton = document.getElementById("choose-advanced-setup");
+const backToOnboardingButton = document.getElementById("back-to-onboarding");
 const completeBasicSetupButton = document.getElementById("complete-basic-setup");
 const managedKeyNode = document.getElementById("managed-key");
+const managedKeyAdvancedNode = document.getElementById("managed-key-advanced");
 const providerRadioNodes = Array.from(document.querySelectorAll('input[name="provider-selection"]'));
 const testConnectionButton = document.getElementById("test-connection");
 const connectionStatusNode = document.getElementById("connection-status");
@@ -65,12 +66,6 @@ function normalizeLoadedConfig(config) {
   }
 
   return merged;
-}
-
-function setSaveStatus(message) {
-  if (saveStatusNode) {
-    saveStatusNode.textContent = message;
-  }
 }
 
 function setConnectionStatus(message, tone = "muted") {
@@ -160,7 +155,20 @@ function syncFieldIntoState(node) {
   }
 
   if (node === managedKeyNode) {
-    state.config.managedAccessKey = managedKeyNode.value.trim();
+    const nextValue = managedKeyNode.value.trim();
+    state.config.managedAccessKey = nextValue;
+    if (managedKeyAdvancedNode && managedKeyAdvancedNode.value !== nextValue) {
+      managedKeyAdvancedNode.value = nextValue;
+    }
+    return;
+  }
+
+  if (node === managedKeyAdvancedNode) {
+    const nextValue = managedKeyAdvancedNode.value.trim();
+    state.config.managedAccessKey = nextValue;
+    if (managedKeyNode && managedKeyNode.value !== nextValue) {
+      managedKeyNode.value = nextValue;
+    }
     return;
   }
 
@@ -193,6 +201,9 @@ function applyStateToInputs() {
   if (managedKeyNode) {
     managedKeyNode.value = state.config.managedAccessKey || "";
   }
+  if (managedKeyAdvancedNode) {
+    managedKeyAdvancedNode.value = state.config.managedAccessKey || "";
+  }
 
   for (const node of providerRadioNodes) {
     node.checked = node.value === state.config.provider;
@@ -216,21 +227,22 @@ function render() {
   applyStateToInputs();
 
   const onboardingComplete = Boolean(state.config.onboardingComplete);
+  const onboardingVisible = !onboardingComplete && state.screen === "onboarding";
+  const basicSetupVisible = !onboardingComplete && state.screen === "basic-setup";
   const mainVisible = onboardingComplete && state.screen === "main";
   const advancedVisible = onboardingComplete && state.screen === "advanced";
 
   if (onboardingScreenNode) {
-    onboardingScreenNode.hidden = onboardingComplete;
+    onboardingScreenNode.hidden = !onboardingVisible;
+  }
+  if (basicSetupScreenNode) {
+    basicSetupScreenNode.hidden = !basicSetupVisible;
   }
   if (mainScreenNode) {
     mainScreenNode.hidden = !mainVisible;
   }
   if (advancedScreenNode) {
     advancedScreenNode.hidden = !advancedVisible;
-  }
-
-  if (basicSetupCardNode) {
-    basicSetupCardNode.hidden = state.config.setupMode !== "basic" || onboardingComplete;
   }
 
   if (connectionStatusNode) {
@@ -281,15 +293,13 @@ function saveConfig(configPatch, options = {}) {
           reject(new Error("Could not save settings."));
           return;
         }
-
-        setSaveStatus(options.message || "Settings saved automatically.");
         resolve(nextConfig);
       }
     );
   });
 }
 
-function scheduleAutoSave(message = "Settings saved automatically.") {
+function scheduleAutoSave() {
   if (!state.loaded) {
     return;
   }
@@ -298,14 +308,11 @@ function scheduleAutoSave(message = "Settings saved automatically.") {
     window.clearTimeout(state.saveTimer);
   }
 
-  setSaveStatus("Saving...");
   state.saveTimer = window.setTimeout(() => {
     state.saveTimer = null;
     state.isSaving = true;
-    void saveConfig(buildConfigPatch(), { message })
-      .catch((error) => {
-        setSaveStatus(`Could not save settings: ${error instanceof Error ? error.message : "Unknown error"}`);
-      })
+    void saveConfig(buildConfigPatch())
+      .catch((_error) => {})
       .finally(() => {
         state.isSaving = false;
       });
@@ -331,6 +338,20 @@ function openMainScreen() {
   render();
 }
 
+function openOnboardingScreen() {
+  state.screen = "onboarding";
+  render();
+}
+
+function openBasicSetupScreen() {
+  state.config = {
+    ...state.config,
+    setupMode: "basic"
+  };
+  state.screen = "basic-setup";
+  render();
+}
+
 function handleConnectionTestResult(response) {
   const result = response && response.result ? response.result : null;
   if (response && response.ok && result) {
@@ -352,19 +373,13 @@ function chooseAdvancedSetup() {
     setupMode: "advanced",
     onboardingComplete: true
   };
-  state.screen = "main";
-  setSaveStatus("Saving...");
-  void saveConfig(state.config, { message: "Advanced setup saved." }).catch((error) => {
-    setSaveStatus(`Could not save settings: ${error instanceof Error ? error.message : "Unknown error"}`);
-  });
+  state.screen = "advanced";
+  render();
+  void saveConfig(state.config).catch((_error) => {});
 }
 
 function chooseBasicSetup() {
-  state.config = {
-    ...state.config,
-    setupMode: "basic"
-  };
-  render();
+  openBasicSetupScreen();
 }
 
 function completeBasicSetup() {
@@ -376,10 +391,8 @@ function completeBasicSetup() {
     managedAccessKey: accessKey
   };
   state.screen = "main";
-  setSaveStatus("Saving...");
-  void saveConfig(state.config, { message: "Basic setup saved." }).catch((error) => {
-    setSaveStatus(`Could not save settings: ${error instanceof Error ? error.message : "Unknown error"}`);
-  });
+  render();
+  void saveConfig(state.config).catch((_error) => {});
 }
 
 function attachFieldAutoSave(node, eventName = "input") {
@@ -398,7 +411,6 @@ chrome.runtime.sendMessage({ type: "SAFETY_NUDGES_GET_API_CONFIG" }, (response) 
   state.config = normalizeLoadedConfig(loadedConfig);
   state.loaded = true;
   state.screen = "main";
-  setSaveStatus("Settings loaded.");
   render();
   refreshRuntimeStatus();
 });
@@ -412,6 +424,7 @@ attachFieldAutoSave(openAiModelNode);
 attachFieldAutoSave(anthropicKeyNode);
 attachFieldAutoSave(anthropicModelNode);
 attachFieldAutoSave(managedKeyNode);
+attachFieldAutoSave(managedKeyAdvancedNode);
 
 if (chooseBasicSetupButton) {
   chooseBasicSetupButton.addEventListener("click", chooseBasicSetup);
@@ -419,6 +432,10 @@ if (chooseBasicSetupButton) {
 
 if (chooseAdvancedSetupButton) {
   chooseAdvancedSetupButton.addEventListener("click", chooseAdvancedSetup);
+}
+
+if (backToOnboardingButton) {
+  backToOnboardingButton.addEventListener("click", openOnboardingScreen);
 }
 
 if (completeBasicSetupButton) {
@@ -440,12 +457,7 @@ if (toggleEnabledButton) {
       enabled: !state.config.enabled
     };
     render();
-    setSaveStatus("Saving...");
-    void saveConfig(state.config, {
-      message: state.config.enabled ? "Safety Nudges resumed." : "Safety Nudges paused."
-    }).catch((error) => {
-      setSaveStatus(`Could not save settings: ${error instanceof Error ? error.message : "Unknown error"}`);
-    });
+    void saveConfig(state.config).catch((_error) => {});
   });
 }
 
