@@ -1,5 +1,6 @@
 const ROOT_ID = "safety-nudges-root";
 const QUIET_PERIOD_MS = 1500;
+const COMPLETION_POLL_MS = 1000;
 const ANALYSIS_RESPONSE_TIMEOUT_MS = 30000;
 const ANALYSIS_ATTEMPT_TIMEOUT_MS = 4000;
 const MAX_ANALYSIS_ATTEMPTS = 8;
@@ -17,6 +18,7 @@ const FIXTURE_SURFACE_META_SELECTOR = 'meta[name="safety-nudges-surface"]';
 const state = {
   observer: null,
   analyzeTimer: null,
+  completionPollTimer: null,
   lastMutationAt: 0,
   nextTooltipId: 0,
   floatingTooltipNode: null,
@@ -268,6 +270,9 @@ function createClaudeSurfaceAdapter() {
     },
     isGenerationInProgress() {
       return Boolean(document.querySelector('div[data-is-streaming="true"]'));
+    },
+    shouldUseCompletionPoller() {
+      return true;
     }
   };
 }
@@ -2044,6 +2049,11 @@ function scheduleAnalysis(reason) {
   }, QUIET_PERIOD_MS);
 }
 
+function shouldUseCompletionPoller() {
+  const adapter = getActiveSurfaceAdapter();
+  return Boolean(adapter && typeof adapter.shouldUseCompletionPoller === "function" && adapter.shouldUseCompletionPoller());
+}
+
 function isInternalMutationNode(node) {
   if (!node) {
     return false;
@@ -2159,6 +2169,24 @@ function installViewportListeners() {
   );
 }
 
+function installCompletionPoller() {
+  if (state.completionPollTimer || !shouldUseCompletionPoller()) {
+    return;
+  }
+
+  state.completionPollTimer = window.setInterval(() => {
+    if (document.visibilityState === "hidden") {
+      return;
+    }
+
+    if (isGenerationInProgress()) {
+      return;
+    }
+
+    void maybeAnalyzeLatestTurn();
+  }, COMPLETION_POLL_MS);
+}
+
 function installShell() {
   if (!isSupportedSurface()) {
     return;
@@ -2176,10 +2204,12 @@ function installShell() {
   );
 
   installMutationObserver();
+  installCompletionPoller();
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       scheduleAnalysis("tab-visible");
+      void maybeAnalyzeLatestTurn();
     }
   });
 }
