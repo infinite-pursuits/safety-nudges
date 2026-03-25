@@ -65,7 +65,7 @@ Failure and anti-spam behavior:
 Load this directory as an unpacked extension in Chrome to continue Step 2 development.
 
 Automated browser harness:
-- For deterministic end-to-end extension validation, use the local fixture harness documented in `docs/step2/extension_automation_harness.md`.
+- For deterministic end-to-end extension validation, use the local fixture harness documented in `docs/extension/extension_automation_harness.md`.
 - The harness launches the real unpacked extension in Chrome, configures the popup automatically, serves ChatGPT-like and Claude-like fixtures on `127.0.0.1`, and drives assertions for panels, highlights, tooltips, invalid spans, and error states.
 - For the Claude DOM path specifically, use `python -m safety_nudges.extension.browser_harness fixture-probe --scenario claude-highlight --json`.
 - For real-page feedback verification without spending OpenAI tokens, use `python -m safety_nudges.extension.browser_harness chatgpt-feedback-e2e --json`.
