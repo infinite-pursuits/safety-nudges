@@ -239,23 +239,27 @@
       <div id="onboarding-screen" class="screen" hidden>
         <div class="card">
           <h2>Choose setup</h2>
-          <p class="muted">Basic setup uses a key we provide. Advanced setup lets you paste your own API keys.</p>
-          <button id="choose-basic-setup" class="choice-button" type="button">Basic setup</button>
+          <p class="muted">Use a Safety Nudges activation code we provide, or enter your own API keys.</p>
+          <button id="choose-basic-setup" class="choice-button" type="button">Use activation code</button>
           <button id="choose-advanced-setup" class="choice-button secondary" type="button">Advanced setup</button>
         </div>
       </div>
 
       <div id="basic-setup-screen" class="screen" hidden>
         <div class="header-row">
-          <h2>Basic setup</h2>
+          <h2>Activation code</h2>
           <button id="back-to-onboarding" class="back-button" type="button">Back</button>
         </div>
         <div class="card">
           <div class="field">
-            <label for="managed-key">Provided setup key</label>
-            <input id="managed-key" type="password" placeholder="sn-alpha-placeholder-...">
+            <label for="managed-email">Activation email</label>
+            <input id="managed-email" type="email" placeholder="you@example.com">
           </div>
-          <p class="tiny">Paste the key we provided to you. Real provider activation is still a placeholder in this build.</p>
+          <div class="field">
+            <label for="managed-key">Safety Nudges activation code</label>
+            <input id="managed-key" type="password" placeholder="AB12CD34">
+          </div>
+          <p class="tiny">Enter the activation email and Safety Nudges activation code from your onboarding email to finish setup.</p>
           <button id="complete-basic-setup" class="action-button" type="button">Continue</button>
         </div>
       </div>
@@ -307,12 +311,16 @@
 
         <div class="card stack">
           <div class="screen-title">
-            <h2>Basic setup key</h2>
-            <p class="tiny">If you were given a setup key, you can paste or replace it here later.</p>
+            <h2>Safety Nudges activation code</h2>
+            <p class="tiny">If you were given a Safety Nudges activation code, you can paste or replace it here later.</p>
           </div>
           <div class="field">
-            <label for="managed-key-advanced">Provided setup key</label>
-            <input id="managed-key-advanced" type="password" placeholder="sn-alpha-placeholder-...">
+            <label for="managed-email-advanced">Activation email</label>
+            <input id="managed-email-advanced" type="email" placeholder="you@example.com">
+          </div>
+          <div class="field">
+            <label for="managed-key-advanced">Safety Nudges activation code</label>
+            <input id="managed-key-advanced" type="password" placeholder="AB12CD34">
           </div>
         </div>
 

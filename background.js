@@ -15,6 +15,7 @@ const DEFAULT_API_CONFIG = {
   identifySpans: true,
   setupMode: "advanced",
   onboardingComplete: false,
+  managedEmail: "",
   managedAccessKey: "",
   openAiApiKey: "",
   openAiModel: "gpt-5-mini",
@@ -144,6 +145,28 @@ async function fetchWithTimeout(resource, options = {}, timeoutMs = NETWORK_TIME
   }
 }
 
+async function callSupabaseManagedAccess(action, payload = {}) {
+  const response = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/provision-alpha-user`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+    },
+    body: JSON.stringify({
+      action,
+      ...payload
+    })
+  });
+
+  const raw = await response.json();
+  if (!response.ok) {
+    const message = raw && typeof raw.error === "string" ? raw.error : `Managed access request failed with HTTP ${response.status}.`;
+    throw new Error(message);
+  }
+  return raw;
+}
+
 function formatOllamaHttpError(response, errorText, endpoint) {
   const truncatedText = (errorText || "").slice(0, 300);
   const runtimeOrigin = getRuntimeOrigin();
@@ -245,6 +268,10 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
       typeof config.onboardingComplete === "boolean"
         ? config.onboardingComplete
         : Boolean(existing.onboardingComplete),
+    managedEmail:
+      typeof config.managedEmail === "string"
+        ? config.managedEmail.trim().toLowerCase()
+        : existing.managedEmail || DEFAULT_API_CONFIG.managedEmail,
     managedAccessKey:
       typeof config.managedAccessKey === "string"
         ? config.managedAccessKey.trim()
@@ -283,6 +310,7 @@ function setStoredApiConfig(config) {
             identifySpans: nextConfig.identifySpans,
             setupMode: nextConfig.setupMode,
             onboardingComplete: nextConfig.onboardingComplete,
+            managedEmail: nextConfig.managedEmail || null,
             openAiModel: nextConfig.openAiModel,
             anthropicModel: nextConfig.anthropicModel,
             ollamaModel: nextConfig.ollamaModel,
@@ -396,6 +424,20 @@ function classifyConnectionFailure(errorMessage) {
   }
 
   if (
+    normalized.includes("budget") ||
+    normalized.includes("blocked because") ||
+    normalized.includes("managed allocation is blocked") ||
+    normalized.includes("402")
+  ) {
+    return buildFriendlyConnectionResult(
+      false,
+      "Connection test failed. This Safety Nudges account has reached its spend limit.",
+      null,
+      "budget_blocked"
+    );
+  }
+
+  if (
     normalized.includes("incorrect api key") ||
     normalized.includes("invalid api key") ||
     normalized.includes("authentication") ||
@@ -419,10 +461,10 @@ function classifyConnectionFailure(errorMessage) {
     );
   }
 
-  if (normalized.includes("setup key") || normalized.includes("activation key")) {
+  if (normalized.includes("setup key") || normalized.includes("activation key") || normalized.includes("activation code")) {
     return buildFriendlyConnectionResult(
       false,
-      "Connection test failed. We could not verify that setup key.",
+      "Connection test failed. We could not verify that Safety Nudges activation code.",
       null,
       "invalid_setup_key"
     );
@@ -437,23 +479,53 @@ function classifyConnectionFailure(errorMessage) {
 }
 
 async function testManagedActivationConnection(config) {
+  const managedEmail = typeof config.managedEmail === "string" ? config.managedEmail.trim().toLowerCase() : "";
   const accessKey = typeof config.managedAccessKey === "string" ? config.managedAccessKey.trim() : "";
+  if (!managedEmail) {
+    throw new Error("Activation email is missing. Paste the email address that received the Safety Nudges activation code.");
+  }
   if (!accessKey) {
-    throw new Error("Setup key is missing. Paste the key we provided to you.");
+    throw new Error("Safety Nudges activation code is missing. Paste the code we provided to you.");
+  }
+  const activationResult = await callSupabaseManagedAccess("exchange_activation", {
+    email: managedEmail,
+    activation_code: accessKey
+  });
+  const testResult = await callSupabaseManagedAccess("managed_openai_test", {
+    email: managedEmail,
+    activation_code: accessKey
+  });
+  const rawText = extractOpenAiTextResponse(testResult.raw_response || {});
+  try {
+    JSON.parse(rawText);
+  } catch (error) {
+    throw new Error(`Managed OpenAI returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
   }
 
-  if (accessKey.startsWith("sn-alpha-placeholder-") || accessKey.startsWith("sn-alpha-demo-")) {
-    const result = buildFriendlyConnectionResult(
-      true,
-      "Connection test succeeded. This placeholder setup key was accepted.",
-      { mode: "placeholder-managed-access" },
-      "placeholder_success"
-    );
-    logEvent("info", "Managed setup key placeholder accepted", result.details);
-    return result;
-  }
+  const hydratedConfig = {
+    ...config,
+    provider: activationResult.provider || "openai",
+    openAiModel: activationResult.default_model || config.openAiModel || DEFAULT_API_CONFIG.openAiModel,
+    onboardingComplete: true,
+    setupMode: "basic",
+    managedEmail,
+    managedAccessKey: accessKey
+  };
+  await setStoredApiConfig(hydratedConfig);
 
-  throw new Error("Setup key could not be verified.");
+  const result = buildFriendlyConnectionResult(
+    true,
+    `Connection test succeeded. Managed ${hydratedConfig.provider === "openai" ? "OpenAI" : "provider"} access is ready.`,
+    {
+      provider: hydratedConfig.provider,
+      model: hydratedConfig.openAiModel,
+      allocationId: activationResult.allocation_id || null,
+      providerProjectId: activationResult.provider_project_id || null
+    },
+    "managed_openai_success"
+  );
+  logEvent("info", "Managed activation code verified via Supabase Edge Function", result.details);
+  return result;
 }
 
 function buildAnalysisPromptParts(payload) {
@@ -1562,6 +1634,7 @@ async function testProviderConnection(configOverride) {
 
 async function analyzeLatestTurn(payload, trace = null) {
   const config = await getStoredApiConfig();
+  const setupMode = normalizeSetupMode(config.setupMode);
   const provider = resolveProviderForPayload(config, payload);
   logEvent("info", "Starting analysis execution", {
     requestId: trace ? trace.requestId : null,
@@ -1583,7 +1656,56 @@ async function analyzeLatestTurn(payload, trace = null) {
 
   let result;
   try {
+    if (setupMode === "basic") {
+      if (provider !== "openai") {
+        throw new Error("Managed activation-code mode currently supports OpenAI only.");
+      }
+      const managedEmail = typeof config.managedEmail === "string" ? config.managedEmail.trim().toLowerCase() : "";
+      const accessKey = typeof config.managedAccessKey === "string" ? config.managedAccessKey.trim() : "";
+      if (!managedEmail || !accessKey) {
+        throw new Error("Managed activation is missing email or activation code.");
+      }
+      const requestBody = {
+        model: config.openAiModel || DEFAULT_API_CONFIG.openAiModel,
+        input: buildOpenAiMessages(payload),
+        max_output_tokens: 700,
+        text: {
+          format: {
+            type: "json_object"
+          },
+          verbosity: "low"
+        },
+        reasoning: {
+          effort: "minimal"
+        }
+      };
+      logEvent("info", "Sending managed OpenAI analysis relay request", {
+        requestId: trace ? trace.requestId : null,
+        model: requestBody.model,
+        conversationId: payload.conversationId || null
+      });
+      const relayResponse = await callSupabaseManagedAccess("managed_openai_analyze", {
+        email: managedEmail,
+        activation_code: accessKey,
+        analysis_payload: requestBody
+      });
+      const rawResponse = relayResponse.raw_response || {};
+      const rawText = extractOpenAiTextResponse(rawResponse);
+      logEvent("info", "Received managed OpenAI analysis response", {
+        requestId: trace ? trace.requestId : null,
+        model: requestBody.model,
+        responseChars: rawText.length
+      });
+      let parsed;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch (error) {
+        throw new Error(`Managed OpenAI returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
+      }
+      result = normalizeAnalysisResponse(parsed, payload);
+    } else {
     result = await getProviderAdapter(provider).analyze(payload, config, trace);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown analysis error";
     logEvent("error", "Analysis execution failed before a result was returned", {

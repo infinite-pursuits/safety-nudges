@@ -1884,6 +1884,7 @@ function renderIssueList(listNode, result) {
 }
 
 function renderFeedbackSection(anchor, feedbackState, analysisState = null) {
+  const feedbackSection = anchor.querySelector(".safety-nudges-feedback-section");
   const options = Array.from(anchor.querySelectorAll(".safety-nudges-feedback-option"));
   const commentWrap = anchor.querySelector(".safety-nudges-feedback-comment");
   const textarea = anchor.querySelector(".safety-nudges-feedback-textarea");
@@ -1897,6 +1898,15 @@ function renderFeedbackSection(anchor, feedbackState, analysisState = null) {
   const isSubmitting = feedbackState && feedbackState.status === "submitting";
   const canShowForm = Boolean(selectedValue) && !isSubmitted;
   const analysisComplete = !analysisState || analysisState.status === "complete";
+  const analysisFailed = Boolean(analysisState && analysisState.status === "error");
+
+  if (feedbackSection) {
+    feedbackSection.hidden = analysisFailed;
+  }
+
+  if (analysisFailed) {
+    return;
+  }
 
   for (const option of options) {
     const isActive = option.dataset.feedbackValue === selectedValue;

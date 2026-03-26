@@ -3,6 +3,7 @@ const DEFAULT_CONFIG = {
   enabled: true,
   setupMode: "advanced",
   onboardingComplete: false,
+  managedEmail: "",
   managedAccessKey: "",
   openAiApiKey: "",
   openAiModel: "gpt-5-mini",
@@ -20,6 +21,8 @@ const chooseBasicSetupButton = document.getElementById("choose-basic-setup");
 const chooseAdvancedSetupButton = document.getElementById("choose-advanced-setup");
 const backToOnboardingButton = document.getElementById("back-to-onboarding");
 const completeBasicSetupButton = document.getElementById("complete-basic-setup");
+const managedEmailNode = document.getElementById("managed-email");
+const managedEmailAdvancedNode = document.getElementById("managed-email-advanced");
 const managedKeyNode = document.getElementById("managed-key");
 const managedKeyAdvancedNode = document.getElementById("managed-key-advanced");
 const providerRadioNodes = Array.from(document.querySelectorAll('input[name="provider-selection"]'));
@@ -152,6 +155,7 @@ function buildConfigPatch() {
     enabled: state.config.enabled,
     setupMode: state.config.setupMode,
     onboardingComplete: state.config.onboardingComplete,
+    managedEmail: managedEmailNode ? managedEmailNode.value.trim().toLowerCase() : state.config.managedEmail,
     managedAccessKey: managedKeyNode ? managedKeyNode.value.trim() : state.config.managedAccessKey,
     openAiApiKey: openAiKeyNode ? openAiKeyNode.value.trim() : state.config.openAiApiKey,
     openAiModel: openAiModelNode ? openAiModelNode.value.trim() : state.config.openAiModel,
@@ -170,6 +174,24 @@ function syncFieldIntoState(node) {
     state.config.managedAccessKey = nextValue;
     if (managedKeyAdvancedNode && managedKeyAdvancedNode.value !== nextValue) {
       managedKeyAdvancedNode.value = nextValue;
+    }
+    return;
+  }
+
+  if (node === managedEmailNode) {
+    const nextValue = managedEmailNode.value.trim().toLowerCase();
+    state.config.managedEmail = nextValue;
+    if (managedEmailAdvancedNode && managedEmailAdvancedNode.value !== nextValue) {
+      managedEmailAdvancedNode.value = nextValue;
+    }
+    return;
+  }
+
+  if (node === managedEmailAdvancedNode) {
+    const nextValue = managedEmailAdvancedNode.value.trim().toLowerCase();
+    state.config.managedEmail = nextValue;
+    if (managedEmailNode && managedEmailNode.value !== nextValue) {
+      managedEmailNode.value = nextValue;
     }
     return;
   }
@@ -212,8 +234,14 @@ function applyStateToInputs() {
   if (managedKeyNode) {
     managedKeyNode.value = state.config.managedAccessKey || "";
   }
+  if (managedEmailNode) {
+    managedEmailNode.value = state.config.managedEmail || "";
+  }
   if (managedKeyAdvancedNode) {
     managedKeyAdvancedNode.value = state.config.managedAccessKey || "";
+  }
+  if (managedEmailAdvancedNode) {
+    managedEmailAdvancedNode.value = state.config.managedEmail || "";
   }
 
   for (const node of providerRadioNodes) {
@@ -469,9 +497,9 @@ async function runAdvancedConnectionTest() {
   }
 
   const checks = [];
-  if ((state.config.managedAccessKey || "").trim()) {
+  if ((state.config.managedAccessKey || "").trim() && (state.config.managedEmail || "").trim()) {
     checks.push({
-      label: "Provided setup key",
+      label: "Safety Nudges activation code",
       config: {
         ...state.config,
         setupMode: "basic",
@@ -507,7 +535,7 @@ async function runAdvancedConnectionTest() {
     stopFastActivityPolling();
     state.isTestingConnection = false;
     render();
-    setAdvancedConnectionStatus("❌ No provided setup key or API keys are available to test.", "error");
+    setAdvancedConnectionStatus("❌ No activation email + Safety Nudges activation code or API keys are available to test.", "error");
     return;
   }
 
@@ -568,10 +596,12 @@ function chooseBasicSetup() {
 
 function completeBasicSetup() {
   const accessKey = managedKeyNode ? managedKeyNode.value.trim() : "";
+  const managedEmail = managedEmailNode ? managedEmailNode.value.trim().toLowerCase() : "";
   state.config = {
     ...state.config,
     setupMode: "basic",
     onboardingComplete: true,
+    managedEmail,
     managedAccessKey: accessKey
   };
   state.screen = "main";
@@ -607,6 +637,8 @@ attachFieldAutoSave(openAiKeyNode);
 attachFieldAutoSave(openAiModelNode);
 attachFieldAutoSave(anthropicKeyNode);
 attachFieldAutoSave(anthropicModelNode);
+attachFieldAutoSave(managedEmailNode);
+attachFieldAutoSave(managedEmailAdvancedNode);
 attachFieldAutoSave(managedKeyNode);
 attachFieldAutoSave(managedKeyAdvancedNode);
 

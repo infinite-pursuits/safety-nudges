@@ -8,7 +8,7 @@ What is implemented:
 - A content script with host adapters for ChatGPT-style and Claude-style DOMs that waits for a quiet period after mutations and extracts the latest user prompt plus assistant response.
 - A small lower-right in-page nudge that stays hidden unless an issue is detected (or debug mode is enabled).
 - A judgments-panel feedback flow with thumbs up/down, an optional short comment, inline consent copy, and direct Supabase persistence for submitted feedback.
-- A popup redesigned around nontechnical use: first-run basic vs advanced setup, a simple provider selector, a prominent play/pause control, and an advanced screen for manual OpenAI/Anthropic keys and logs.
+- A popup redesigned around nontechnical use: first-run activation-code vs advanced setup, a simple provider selector, a prominent play/pause control, and an advanced screen for manual OpenAI/Anthropic keys and logs.
 
 Testing visibility:
 - The background service worker logs request start, response receipt, latency, provider-specific metadata, no-issue completions, issue detections, and failures to the extension console.
@@ -20,8 +20,8 @@ Using Anthropic:
 - Manual Anthropic key entry should remain available even if the future alpha onboarding flow provisions managed credentials through Supabase Edge Functions.
 
 Using the popup:
-- On first run, users choose between `Basic setup` and `Advanced setup`.
-- `Basic setup` accepts a provided setup key. In the current build this verification is still a placeholder and is tracked by `safety-nudges-6wp.2.1` and `safety-nudges-6wp.2.2`.
+- On first run, users choose between `Use activation code` and `Advanced setup`.
+- `Use activation code` exchanges the user's email plus Safety Nudges activation code with the hosted Supabase Edge Function and stores only managed session metadata locally.
 - `Advanced setup` keeps manual OpenAI and Anthropic API key entry available.
 - After setup, the main screen exposes only three provider choices: `OpenAI`, `Anthropic`, and `Complementary provider` (`OpenAI` on `claude.ai`, `Anthropic` on `chatgpt.com`).
 - Settings save automatically when changed.
