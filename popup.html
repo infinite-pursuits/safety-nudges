@@ -225,6 +225,13 @@
         gap: 6px;
       }
 
+      .data-use-copy {
+        margin: 0;
+        color: #2d3442;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
       #activity-log {
         max-height: 180px;
         overflow: auto;
@@ -310,11 +317,6 @@
 
           <button id="toggle-enabled" class="toggle-button" type="button" data-enabled="true">Pause Safety Nudges</button>
           <p id="toggle-description" class="tiny">Safety Nudges is currently watching supported chat pages.</p>
-          <div class="card notice-card">
-            <h2>Data use</h2>
-            <p id="analysis-disclosure">When Safety Nudges is on, it sends the latest prompt and response to your selected analysis provider.</p>
-            <p>Feedback is optional. If you do not want to share chat details with Safety Nudges, do not submit feedback.</p>
-          </div>
         </div>
 
         <button id="open-advanced-settings" class="text-link" type="button">Advanced settings</button>
@@ -385,9 +387,7 @@
           <button id="close-data-use" class="back-button" type="button">Back</button>
         </div>
 
-        <div class="card notice-card">
-          <p id="data-use-description">When Safety Nudges is on, it sends the latest prompt and response from the supported chat page to the selected analysis provider so it can generate a warning. If you use Safety Nudges managed access, those requests pass through Safety Nudges managed infrastructure using a scoped session token rather than your activation code. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it.</p>
-        </div>
+        <p id="data-use-description" class="data-use-copy">When Safety Nudges is on, it sends the latest prompt and response from the supported chat page to the selected analysis provider so it can generate a warning. If you use Safety Nudges managed access, those requests pass through Safety Nudges managed infrastructure using a scoped session token rather than your activation code. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it.</p>
       </div>
     </div>
     <script src="popup.js"></script>
