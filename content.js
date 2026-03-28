@@ -1272,7 +1272,7 @@ function ensureResponseAnchor(responseNode, fingerprint) {
       "</div>",
       "</div>",
       `<label class="safety-nudges-feedback-comment" hidden><span>Optional comment</span><textarea class="safety-nudges-feedback-textarea" rows="3" maxlength="${FEEDBACK_COMMENT_MAX_CHARS}" placeholder="Tell us what was right or wrong about this nudge."></textarea></label>`,
-      '<label class="safety-nudges-feedback-consent" hidden><input type="checkbox" class="safety-nudges-feedback-consent-checkbox"> <span>I agree to share this chat\'s details and my optional comment with the Safety Nudges research team for evaluation, product improvement, and model training.</span></label>',
+      '<label class="safety-nudges-feedback-consent" hidden><input type="checkbox" class="safety-nudges-feedback-consent-checkbox"> <span>I agree to share this chat\'s details and my optional comment with the Safety Nudges research team for evaluation and product improvement.</span></label>',
       '<p class="safety-nudges-feedback-consent-note" hidden>Feedback is optional. If you do not want to share chat details with Safety Nudges, do not submit feedback. Avoid submitting especially sensitive personal information.</p>',
       '<p class="safety-nudges-feedback-status" aria-live="polite"></p>',
       '<div class="safety-nudges-feedback-actions" hidden>',
@@ -1992,7 +1992,7 @@ function renderFeedbackSection(anchor, feedbackState, analysisState = null) {
     return;
   }
   if (canShowForm && !consentChecked) {
-    status.textContent = "Feedback is optional. Check the consent box only if you want to share this chat with Safety Nudges.";
+    status.textContent = "";
     return;
   }
   status.textContent = "";
