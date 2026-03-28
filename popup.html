@@ -195,6 +195,15 @@
         color: #6b7280;
       }
 
+      .notice-card {
+        border-color: rgba(180, 83, 9, 0.18);
+        background: rgba(255, 251, 235, 0.92);
+      }
+
+      .notice-card p {
+        font-size: 12px;
+      }
+
       .header-row {
         display: flex;
         align-items: center;
@@ -243,6 +252,11 @@
           <button id="choose-basic-setup" class="choice-button" type="button">Use activation code</button>
           <button id="choose-advanced-setup" class="choice-button secondary" type="button">Advanced setup</button>
         </div>
+        <div class="card notice-card">
+          <h2>Data use</h2>
+          <p>When Safety Nudges is on, it sends the latest prompt and response from the supported chat page to the analysis provider you choose.</p>
+          <p>Safety Nudges does not send chat history to its own database unless you explicitly choose to submit feedback.</p>
+        </div>
       </div>
 
       <div id="basic-setup-screen" class="screen" hidden>
@@ -261,6 +275,11 @@
           </div>
           <p class="tiny">Enter the activation email and Safety Nudges activation code from your onboarding email to finish setup.</p>
           <button id="complete-basic-setup" class="action-button" type="button">Continue</button>
+        </div>
+        <div class="card notice-card">
+          <h2>Data use</h2>
+          <p>In activation-code mode, Safety Nudges sends the latest prompt and response through Safety Nudges managed infrastructure so it can be analyzed with OpenAI.</p>
+          <p>Feedback is optional. Chat history is only sent to the Safety Nudges database if you later submit feedback and explicitly opt in.</p>
         </div>
       </div>
 
@@ -298,6 +317,11 @@
 
           <button id="toggle-enabled" class="toggle-button" type="button" data-enabled="true">Pause Safety Nudges</button>
           <p id="toggle-description" class="tiny">Safety Nudges is currently watching supported chat pages.</p>
+          <div class="card notice-card">
+            <h2>Data use</h2>
+            <p id="analysis-disclosure">When Safety Nudges is on, it sends the latest prompt and response to your selected analysis provider.</p>
+            <p>Feedback is optional. If you do not want to share chat details with Safety Nudges, do not submit feedback.</p>
+          </div>
         </div>
 
         <button id="open-advanced-settings" class="text-link" type="button">Advanced settings</button>
@@ -333,6 +357,7 @@
             <label for="openai-model">OpenAI model</label>
             <input id="openai-model" type="text" placeholder="gpt-5-mini">
           </div>
+          <p class="tiny">Manual OpenAI keys are kept only for the current browser session and must be re-entered after Chrome restarts.</p>
         </div>
 
         <div class="card stack">
@@ -344,6 +369,7 @@
             <label for="anthropic-model">Anthropic model</label>
             <input id="anthropic-model" type="text" placeholder="claude-sonnet-4-6">
           </div>
+          <p class="tiny">Manual Anthropic keys are kept only for the current browser session and must be re-entered after Chrome restarts.</p>
         </div>
 
         <div class="card stack">
@@ -354,6 +380,12 @@
         <div class="card stack">
           <button id="advanced-test-connection" class="action-button secondary" type="button">Test connection</button>
           <p id="advanced-connection-status" class="status-line" data-tone="muted">No advanced connection test run yet.</p>
+        </div>
+
+        <div class="card notice-card">
+          <h2>Data use</h2>
+          <p id="advanced-analysis-disclosure">When Safety Nudges is on, it sends the latest prompt and response to your selected analysis provider.</p>
+          <p>Do not treat feedback submission as anonymous if your chat text contains personal information. Feedback is optional and only reaches the Safety Nudges database if you explicitly submit it.</p>
         </div>
       </div>
     </div>

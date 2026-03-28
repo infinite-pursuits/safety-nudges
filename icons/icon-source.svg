@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Safety Nudges icon</title>
+  <desc id="desc">Amber alert badge with an exclamation mark and a nudge arc.</desc>
+  <rect width="128" height="128" rx="24" fill="#1f2937" />
+  <rect x="16" y="16" width="96" height="96" rx="24" fill="#f59e0b" />
+  <rect x="36" y="28" width="14" height="44" rx="7" fill="#1f2937" />
+  <circle cx="43" cy="88" r="8" fill="#1f2937" />
+  <path
+    d="M72 32c14 0 28 10 32 24"
+    fill="none"
+    stroke="#1f2937"
+    stroke-linecap="round"
+    stroke-width="10"
+  />
+</svg>

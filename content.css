@@ -398,8 +398,23 @@
 }
 
 .safety-nudges-feedback-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin-top: 8px;
   color: #475569;
+}
+
+.safety-nudges-feedback-consent-checkbox {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.safety-nudges-feedback-consent-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #64748b;
 }
 
 .safety-nudges-feedback-status {

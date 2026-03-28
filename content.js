@@ -7,7 +7,7 @@ const MAX_ANALYSIS_ATTEMPTS = 8;
 const STALE_ANALYSIS_RETRY_MS = 5000;
 const FEEDBACK_COMMENT_MAX_CHARS = 280;
 const FEEDBACK_SCHEMA_VERSION = "1.0.0";
-const FEEDBACK_DISCLOSURE_VERSION = "2026-03-10";
+const FEEDBACK_DISCLOSURE_VERSION = "2026-03-28";
 const FEEDBACK_SUBMIT_EVENT = "judgment_feedback_submitted";
 const FEEDBACK_FAILURE_EVENT = "judgment_feedback_failed";
 const ANONYMOUS_CONVERSATION_STORAGE_KEY = "safety_nudges_anonymous_conversation_id";
@@ -460,17 +460,19 @@ function applyStoredAnalysisConfig(config) {
 }
 
 function loadStoredAnalysisConfig() {
-  try {
-    chrome.storage.local.get(["analysisApi"], (stored) => {
-      if (chrome.runtime.lastError) {
+  void sendRuntimeMessage({
+    type: "SAFETY_NUDGES_GET_API_CONFIG"
+  })
+    .then((response) => {
+      if (!response || !response.ok) {
         return;
       }
 
-      applyStoredAnalysisConfig(stored.analysisApi || null);
+      applyStoredAnalysisConfig(response.config || null);
+    })
+    .catch((_error) => {
+      // Ignore background messaging failures and keep the default enabled state.
     });
-  } catch (_error) {
-    // Ignore storage failures and keep the default enabled state.
-  }
 }
 
 function nowMs() {
@@ -555,6 +557,7 @@ function getInitialFeedbackState() {
     stage: "idle",
     selected: "",
     comment: "",
+    consentChecked: false,
     status: "idle",
     message: "",
     submittedAt: "",
@@ -666,7 +669,8 @@ function buildFeedbackPayload(payload, fingerprint, analysisState, feedbackState
     comment: feedbackState.comment.trim(),
     consent: {
       disclosure_version: FEEDBACK_DISCLOSURE_VERSION,
-      share_chat_history: true,
+      explicit_opt_in: Boolean(feedbackState.consentChecked),
+      share_chat_history: Boolean(feedbackState.consentChecked),
       purposes: ["research", "training", "product_improvement"]
     },
     judgment: {
@@ -1268,7 +1272,8 @@ function ensureResponseAnchor(responseNode, fingerprint) {
       "</div>",
       "</div>",
       `<label class="safety-nudges-feedback-comment" hidden><span>Optional comment</span><textarea class="safety-nudges-feedback-textarea" rows="3" maxlength="${FEEDBACK_COMMENT_MAX_CHARS}" placeholder="Tell us what was right or wrong about this nudge."></textarea></label>`,
-      '<p class="safety-nudges-feedback-consent" hidden>Submitting feedback shares the current chat history with the Safety Nudges research team for evaluation, product improvement, and model training.</p>',
+      '<label class="safety-nudges-feedback-consent" hidden><input type="checkbox" class="safety-nudges-feedback-consent-checkbox"> <span>I agree to share this chat\'s details and my optional comment with the Safety Nudges research team for evaluation, product improvement, and model training.</span></label>',
+      '<p class="safety-nudges-feedback-consent-note" hidden>Feedback is optional. If you do not want to share chat details with Safety Nudges, do not submit feedback. Avoid submitting especially sensitive personal information.</p>',
       '<p class="safety-nudges-feedback-status" aria-live="polite"></p>',
       '<div class="safety-nudges-feedback-actions" hidden>',
       '<button type="button" class="safety-nudges-feedback-submit">Submit feedback</button>',
@@ -1332,6 +1337,21 @@ function ensureResponseAnchor(responseNode, fingerprint) {
       });
     }
 
+    const consentCheckbox = anchor.querySelector(".safety-nudges-feedback-consent-checkbox");
+    if (consentCheckbox) {
+      consentCheckbox.addEventListener("change", () => {
+        const feedbackState = getFeedbackState(fingerprint);
+        if (feedbackState.stage === "submitted") {
+          return;
+        }
+
+        feedbackState.consentChecked = Boolean(consentCheckbox.checked);
+        feedbackState.status = "idle";
+        feedbackState.message = "";
+        renderFeedbackSection(anchor, feedbackState);
+      });
+    }
+
     const cancelButton = anchor.querySelector(".safety-nudges-feedback-cancel");
     if (cancelButton) {
       cancelButton.addEventListener("click", (event) => {
@@ -1351,7 +1371,13 @@ function ensureResponseAnchor(responseNode, fingerprint) {
         const payloadForSubmit = state.payloadByFingerprint.get(fingerprint);
         const analysisForSubmit = state.analysesByFingerprint.get(fingerprint);
         const feedbackState = getFeedbackState(fingerprint);
-        if (!payloadForSubmit || !analysisForSubmit || !feedbackState.selected || feedbackState.stage === "submitted") {
+        if (
+          !payloadForSubmit ||
+          !analysisForSubmit ||
+          !feedbackState.selected ||
+          !feedbackState.consentChecked ||
+          feedbackState.stage === "submitted"
+        ) {
           return;
         }
 
@@ -1889,11 +1915,14 @@ function renderFeedbackSection(anchor, feedbackState, analysisState = null) {
   const commentWrap = anchor.querySelector(".safety-nudges-feedback-comment");
   const textarea = anchor.querySelector(".safety-nudges-feedback-textarea");
   const consent = anchor.querySelector(".safety-nudges-feedback-consent");
+  const consentCheckbox = anchor.querySelector(".safety-nudges-feedback-consent-checkbox");
+  const consentNote = anchor.querySelector(".safety-nudges-feedback-consent-note");
   const status = anchor.querySelector(".safety-nudges-feedback-status");
   const actions = anchor.querySelector(".safety-nudges-feedback-actions");
   const submitButton = anchor.querySelector(".safety-nudges-feedback-submit");
   const cancelButton = anchor.querySelector(".safety-nudges-feedback-cancel");
   const selectedValue = feedbackState && feedbackState.selected ? feedbackState.selected : "";
+  const consentChecked = Boolean(feedbackState && feedbackState.consentChecked);
   const isSubmitted = feedbackState && feedbackState.stage === "submitted";
   const isSubmitting = feedbackState && feedbackState.status === "submitting";
   const canShowForm = Boolean(selectedValue) && !isSubmitted;
@@ -1927,11 +1956,18 @@ function renderFeedbackSection(anchor, feedbackState, analysisState = null) {
   if (consent) {
     consent.hidden = !canShowForm;
   }
+  if (consentCheckbox) {
+    consentCheckbox.checked = consentChecked;
+    consentCheckbox.disabled = isSubmitted || isSubmitting || !analysisComplete;
+  }
+  if (consentNote) {
+    consentNote.hidden = !canShowForm;
+  }
   if (actions) {
     actions.hidden = !canShowForm;
   }
   if (submitButton) {
-    submitButton.disabled = !selectedValue || isSubmitted || isSubmitting || !analysisComplete;
+    submitButton.disabled = !selectedValue || !consentChecked || isSubmitted || isSubmitting || !analysisComplete;
     submitButton.textContent = isSubmitting ? "Submitting..." : "Submit feedback";
   }
   if (cancelButton) {
@@ -1953,6 +1989,10 @@ function renderFeedbackSection(anchor, feedbackState, analysisState = null) {
   }
   if (isSubmitted) {
     status.textContent = buildFeedbackSummary(feedbackState);
+    return;
+  }
+  if (canShowForm && !consentChecked) {
+    status.textContent = "Feedback is optional. Check the consent box only if you want to share this chat with Safety Nudges.";
     return;
   }
   status.textContent = "";
@@ -2263,14 +2303,6 @@ function installShell() {
   installViewportListeners();
   loadStoredAnalysisConfig();
 
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes.analysisApi) {
-      return;
-    }
-
-    applyStoredAnalysisConfig(changes.analysisApi.newValue || null);
-  });
-
   chrome.runtime.sendMessage(
     {
       type: "SAFETY_NUDGES_PING",
@@ -2278,6 +2310,18 @@ function installShell() {
     },
     () => {}
   );
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!message || message.type !== "SAFETY_NUDGES_API_CONFIG_UPDATED") {
+      return false;
+    }
+
+    applyStoredAnalysisConfig(message.config || null);
+    sendResponse({
+      ok: true
+    });
+    return false;
+  });
 
   installMutationObserver();
   installCompletionPoller();

@@ -30,6 +30,7 @@ const testConnectionButton = document.getElementById("test-connection");
 const connectionStatusNode = document.getElementById("connection-status");
 const toggleEnabledButton = document.getElementById("toggle-enabled");
 const toggleDescriptionNode = document.getElementById("toggle-description");
+const analysisDisclosureNode = document.getElementById("analysis-disclosure");
 const openAdvancedSettingsButton = document.getElementById("open-advanced-settings");
 const closeAdvancedSettingsButton = document.getElementById("close-advanced-settings");
 const advancedTestConnectionButton = document.getElementById("advanced-test-connection");
@@ -39,6 +40,7 @@ const anthropicKeyNode = document.getElementById("anthropic-key");
 const anthropicModelNode = document.getElementById("anthropic-model");
 const activityLogNode = document.getElementById("activity-log");
 const advancedConnectionStatusNode = document.getElementById("advanced-connection-status");
+const advancedAnalysisDisclosureNode = document.getElementById("advanced-analysis-disclosure");
 
 const state = {
   config: { ...DEFAULT_CONFIG },
@@ -305,6 +307,14 @@ function render() {
       : "Safety Nudges is paused and will not analyze chat responses.";
   }
 
+  const analysisDisclosure = buildAnalysisDisclosure(state.config);
+  if (analysisDisclosureNode) {
+    analysisDisclosureNode.textContent = analysisDisclosure;
+  }
+  if (advancedAnalysisDisclosureNode) {
+    advancedAnalysisDisclosureNode.textContent = analysisDisclosure;
+  }
+
   if (testConnectionButton) {
     testConnectionButton.disabled = !onboardingComplete || state.isTestingConnection;
     testConnectionButton.textContent = state.isTestingConnection ? "Testing..." : "Test connection";
@@ -313,6 +323,23 @@ function render() {
     advancedTestConnectionButton.disabled = !onboardingComplete || state.isTestingConnection;
     advancedTestConnectionButton.textContent = state.isTestingConnection ? "Testing..." : "Test connection";
   }
+}
+
+function buildAnalysisDisclosure(config) {
+  const setupMode = config && config.setupMode === "basic" ? "basic" : "advanced";
+  if (setupMode === "basic") {
+    return "When Safety Nudges is on, it sends the latest prompt and response through Safety Nudges managed infrastructure so OpenAI can analyze it.";
+  }
+
+  if (config && config.provider === "anthropic") {
+    return "When Safety Nudges is on, it sends the latest prompt and response to Anthropic for analysis.";
+  }
+
+  if (config && config.provider === "complementary") {
+    return "When Safety Nudges is on, it sends the latest prompt and response to Anthropic on chatgpt.com and to OpenAI on claude.ai.";
+  }
+
+  return "When Safety Nudges is on, it sends the latest prompt and response to OpenAI for analysis.";
 }
 
 function saveConfig(configPatch, options = {}) {

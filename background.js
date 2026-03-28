@@ -9,8 +9,6 @@ const DEFAULT_ANALYSIS_RESULT = {
 
 const DEFAULT_API_CONFIG = {
   provider: "openai",
-  endpoint: "http://127.0.0.1:8787/analyze",
-  ollamaEndpoint: "http://127.0.0.1:11434/api/chat",
   enabled: true,
   identifySpans: true,
   setupMode: "advanced",
@@ -20,20 +18,25 @@ const DEFAULT_API_CONFIG = {
   openAiApiKey: "",
   openAiModel: "gpt-5-mini",
   anthropicApiKey: "",
-  anthropicModel: "claude-sonnet-4-6",
-  ollamaModel: "llama3.1:8b"
+  anthropicModel: "claude-sonnet-4-6"
 };
 const SUPABASE_URL = "https://bjokhkmomdogymmmnpdo.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_KdngS39ZCxvJ854R0zy3xA_0LKy8nj5";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_API_VERSION = "2023-06-01";
+const DEFAULT_LOCAL_ANALYSIS_ENDPOINT = "http://127.0.0.1:8787/analyze";
+const DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/chat";
+const DEFAULT_OLLAMA_MODEL = "llama3.1:8b";
 
 const MAX_ACTIVITY_LOGS = 40;
 const NETWORK_TIMEOUT_MS = 30000;
 const ACTIVITY_LOG_DEDUPE_WINDOW_MS = 1500;
 const activeAnalysisRequests = new Map();
 let analysisRequestSequence = 0;
+
+const PERSISTED_ANALYSIS_API_KEY = "analysisApi";
+const SESSION_ANALYSIS_SECRETS_KEY = "analysisApiSecrets";
 
 const runtimeState = {
   activityLog: [],
@@ -232,35 +235,82 @@ function logEvent(level, message, details = null) {
   persistRuntimeState();
 }
 
+function broadcastApiConfigUpdate(config) {
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (!tab || typeof tab.id !== "number") {
+        continue;
+      }
+
+      chrome.tabs.sendMessage(
+        tab.id,
+        {
+          type: "SAFETY_NUDGES_API_CONFIG_UPDATED",
+          config
+        },
+        () => {
+          void chrome.runtime.lastError;
+        }
+      );
+    }
+  });
+}
+
 function getStoredApiConfig() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["analysisApi"], (stored) => {
+    chrome.storage.local.get([PERSISTED_ANALYSIS_API_KEY], (stored) => {
       const merged = {
         ...DEFAULT_API_CONFIG,
-        ...(stored.analysisApi || {})
+        ...(stored[PERSISTED_ANALYSIS_API_KEY] || {})
       };
-      if (!merged.onboardingComplete) {
-        const hasLegacySetup =
-          Boolean(merged.openAiApiKey) ||
-          Boolean(merged.anthropicApiKey) ||
-          merged.provider === "local" ||
-          merged.provider === "ollama";
-        if (hasLegacySetup) {
-          merged.onboardingComplete = true;
-          merged.setupMode = merged.setupMode || "advanced";
+      chrome.storage.session.get([SESSION_ANALYSIS_SECRETS_KEY], (sessionStored) => {
+        const sessionSecrets = sessionStored[SESSION_ANALYSIS_SECRETS_KEY] || {};
+        merged.openAiApiKey =
+          typeof sessionSecrets.openAiApiKey === "string" ? sessionSecrets.openAiApiKey.trim() : "";
+        merged.anthropicApiKey =
+          typeof sessionSecrets.anthropicApiKey === "string" ? sessionSecrets.anthropicApiKey.trim() : "";
+
+        if (!merged.onboardingComplete) {
+          const hasLegacySetup =
+            Boolean(merged.openAiApiKey) ||
+            Boolean(merged.anthropicApiKey);
+          if (hasLegacySetup) {
+            merged.onboardingComplete = true;
+            merged.setupMode = merged.setupMode || "advanced";
+          }
         }
-      }
-      resolve(merged);
+        resolve(merged);
+      });
     });
   });
+}
+
+function getSessionSecretConfig(config) {
+  return {
+    openAiApiKey: typeof config.openAiApiKey === "string" ? config.openAiApiKey.trim() : "",
+    anthropicApiKey: typeof config.anthropicApiKey === "string" ? config.anthropicApiKey.trim() : ""
+  };
+}
+
+function getPersistedApiConfig(config) {
+  return {
+    provider: config.provider,
+    enabled: config.enabled,
+    identifySpans: config.identifySpans,
+    setupMode: config.setupMode,
+    onboardingComplete: config.onboardingComplete,
+    managedEmail: config.managedEmail,
+    managedAccessKey: config.managedAccessKey,
+    openAiModel: config.openAiModel,
+    anthropicModel: config.anthropicModel,
+    openAiApiKey: "",
+    anthropicApiKey: ""
+  };
 }
 
 function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
   return {
     provider: normalizeProviderSelection(config.provider || existing.provider),
-    endpoint: config.endpoint || existing.endpoint || DEFAULT_API_CONFIG.endpoint,
-    ollamaEndpoint:
-      config.ollamaEndpoint || existing.ollamaEndpoint || DEFAULT_API_CONFIG.ollamaEndpoint,
     enabled: Boolean(config.enabled),
     identifySpans: config.identifySpans !== false,
     setupMode: normalizeSetupMode(config.setupMode || existing.setupMode),
@@ -285,42 +335,48 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
       typeof config.anthropicApiKey === "string" && config.anthropicApiKey.trim()
         ? config.anthropicApiKey.trim()
         : existing.anthropicApiKey || DEFAULT_API_CONFIG.anthropicApiKey,
-    anthropicModel: config.anthropicModel || existing.anthropicModel || DEFAULT_API_CONFIG.anthropicModel,
-    ollamaModel: config.ollamaModel || existing.ollamaModel || DEFAULT_API_CONFIG.ollamaModel
+    anthropicModel: config.anthropicModel || existing.anthropicModel || DEFAULT_API_CONFIG.anthropicModel
   };
 }
 
 function setStoredApiConfig(config) {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["analysisApi"], (stored) => {
+    chrome.storage.local.get([PERSISTED_ANALYSIS_API_KEY], (stored) => {
       const existing = {
         ...DEFAULT_API_CONFIG,
-        ...(stored.analysisApi || {})
+        ...(stored[PERSISTED_ANALYSIS_API_KEY] || {})
       };
       const nextConfig = buildApiConfig(config, existing);
+      const persistedConfig = getPersistedApiConfig(nextConfig);
+      const sessionSecrets = getSessionSecretConfig(nextConfig);
 
       chrome.storage.local.set(
         {
-          analysisApi: nextConfig
+          [PERSISTED_ANALYSIS_API_KEY]: persistedConfig
         },
         () => {
-          logEvent("info", "Analysis settings updated", {
-            provider: nextConfig.provider,
-            enabled: nextConfig.enabled,
-            identifySpans: nextConfig.identifySpans,
-            setupMode: nextConfig.setupMode,
-            onboardingComplete: nextConfig.onboardingComplete,
-            managedEmail: nextConfig.managedEmail || null,
-            openAiModel: nextConfig.openAiModel,
-            anthropicModel: nextConfig.anthropicModel,
-            ollamaModel: nextConfig.ollamaModel,
-            localEndpoint: nextConfig.endpoint,
-            ollamaEndpoint: nextConfig.ollamaEndpoint,
-            hasOpenAiKey: Boolean(nextConfig.openAiApiKey),
-            hasAnthropicKey: Boolean(nextConfig.anthropicApiKey),
-            hasManagedAccessKey: Boolean(nextConfig.managedAccessKey)
-          });
-          resolve();
+          chrome.storage.session.set(
+            {
+              [SESSION_ANALYSIS_SECRETS_KEY]: sessionSecrets
+            },
+            () => {
+              broadcastApiConfigUpdate(nextConfig);
+              logEvent("info", "Analysis settings updated", {
+                provider: nextConfig.provider,
+                enabled: nextConfig.enabled,
+                identifySpans: nextConfig.identifySpans,
+                setupMode: nextConfig.setupMode,
+                onboardingComplete: nextConfig.onboardingComplete,
+                managedEmail: nextConfig.managedEmail || null,
+                openAiModel: nextConfig.openAiModel,
+                anthropicModel: nextConfig.anthropicModel,
+                hasOpenAiKey: Boolean(nextConfig.openAiApiKey),
+                hasAnthropicKey: Boolean(nextConfig.anthropicApiKey),
+                hasManagedAccessKey: Boolean(nextConfig.managedAccessKey)
+              });
+              resolve();
+            }
+          );
         }
       );
     });
@@ -712,7 +768,14 @@ function buildSupabaseFeedbackRow(payload, config) {
     chat_history: Array.isArray(payload && payload.chat_history) ? payload.chat_history : [],
     flags: payload && payload.flags && typeof payload.flags === "object" ? payload.flags : {},
     is_test: inferFeedbackIsTest(config, payload),
-    raw_payload: payload && typeof payload === "object" ? payload : {}
+    raw_payload: {
+      schema_version: payload && payload.schema_version ? payload.schema_version : null,
+      event_name: payload && payload.event_name ? payload.event_name : null,
+      source: payload && payload.source ? payload.source : null,
+      submitted_at: payload && payload.submitted_at ? payload.submitted_at : null,
+      consent,
+      judgment
+    }
   };
 }
 
@@ -785,7 +848,7 @@ function buildOllamaTagsUrl(endpoint) {
   const fallback = "http://127.0.0.1:11434/api/tags";
 
   try {
-    const url = new URL(endpoint || DEFAULT_API_CONFIG.ollamaEndpoint);
+    const url = new URL(endpoint || DEFAULT_OLLAMA_ENDPOINT);
     url.pathname = "/api/tags";
     url.search = "";
     return url.toString();
@@ -1261,14 +1324,14 @@ async function callAnthropicAnalysis(payload, config, trace = null) {
 
 async function callOllamaAnalysis(payload, config, trace = null) {
   const requestBody = {
-    model: config.ollamaModel || DEFAULT_API_CONFIG.ollamaModel,
+    model: config.ollamaModel || DEFAULT_OLLAMA_MODEL,
     messages: buildOpenAiMessages(payload),
     format: "json",
     stream: false,
     think: false
   };
 
-  const endpoint = config.ollamaEndpoint || DEFAULT_API_CONFIG.ollamaEndpoint;
+  const endpoint = config.ollamaEndpoint || DEFAULT_OLLAMA_ENDPOINT;
   const startedAtMs = nowMs();
   logEvent("info", "Sending Ollama analysis request", {
     requestId: trace ? trace.requestId : null,
@@ -1486,7 +1549,7 @@ async function testLocalEndpointConnection(config) {
 
 async function testOllamaConnection(config) {
   const tagsUrl = buildOllamaTagsUrl(config.ollamaEndpoint);
-  const model = config.ollamaModel || DEFAULT_API_CONFIG.ollamaModel;
+  const model = config.ollamaModel || DEFAULT_OLLAMA_MODEL;
   const tagsStartedAtMs = nowMs();
   logEvent("info", "Checking Ollama model availability", {
     endpoint: tagsUrl,
@@ -1845,6 +1908,8 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 hydrateRuntimeState();
+chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {
