@@ -23,10 +23,16 @@ const onboardingScreenNode = document.getElementById("onboarding-screen");
 const basicSetupScreenNode = document.getElementById("basic-setup-screen");
 const mainScreenNode = document.getElementById("main-screen");
 const advancedScreenNode = document.getElementById("advanced-screen");
+const dataUseScreenNode = document.getElementById("data-use-screen");
 const chooseBasicSetupButton = document.getElementById("choose-basic-setup");
 const chooseAdvancedSetupButton = document.getElementById("choose-advanced-setup");
 const backToOnboardingButton = document.getElementById("back-to-onboarding");
 const completeBasicSetupButton = document.getElementById("complete-basic-setup");
+const openDataUseOnboardingButton = document.getElementById("open-data-use-onboarding");
+const openDataUseBasicButton = document.getElementById("open-data-use-basic");
+const openDataUseMainButton = document.getElementById("open-data-use-main");
+const openDataUseAdvancedButton = document.getElementById("open-data-use-advanced");
+const closeDataUseButton = document.getElementById("close-data-use");
 const managedEmailNode = document.getElementById("managed-email");
 const managedEmailAdvancedNode = document.getElementById("managed-email-advanced");
 const managedKeyNode = document.getElementById("managed-key");
@@ -48,11 +54,13 @@ const anthropicModelNode = document.getElementById("anthropic-model");
 const activityLogNode = document.getElementById("activity-log");
 const advancedConnectionStatusNode = document.getElementById("advanced-connection-status");
 const advancedAnalysisDisclosureNode = document.getElementById("advanced-analysis-disclosure");
+const dataUseDescriptionNode = document.getElementById("data-use-description");
 
 const state = {
   config: { ...DEFAULT_CONFIG },
   loaded: false,
   screen: "main",
+  previousScreen: "main",
   saveTimer: null,
   isSaving: false,
   isTestingConnection: false,
@@ -288,6 +296,7 @@ function render() {
   const basicSetupVisible = !onboardingComplete && state.screen === "basic-setup";
   const mainVisible = onboardingComplete && state.screen === "main";
   const advancedVisible = onboardingComplete && state.screen === "advanced";
+  const dataUseVisible = state.screen === "data-use";
 
   if (onboardingScreenNode) {
     onboardingScreenNode.hidden = !onboardingVisible;
@@ -300,6 +309,9 @@ function render() {
   }
   if (advancedScreenNode) {
     advancedScreenNode.hidden = !advancedVisible;
+  }
+  if (dataUseScreenNode) {
+    dataUseScreenNode.hidden = !dataUseVisible;
   }
 
   if (connectionStatusNode) {
@@ -334,6 +346,9 @@ function render() {
   if (advancedAnalysisDisclosureNode) {
     advancedAnalysisDisclosureNode.textContent = analysisDisclosure;
   }
+  if (dataUseDescriptionNode) {
+    dataUseDescriptionNode.textContent = buildDataUseDescription(state.config);
+  }
 
   if (testConnectionButton) {
     testConnectionButton.disabled = !onboardingComplete || state.isTestingConnection;
@@ -360,6 +375,16 @@ function buildAnalysisDisclosure(config) {
   }
 
   return "When Safety Nudges is on, it sends the latest prompt and response to OpenAI for analysis.";
+}
+
+function buildDataUseDescription(config) {
+  const analysisDisclosure = buildAnalysisDisclosure(config);
+  const managedClause =
+    config && config.setupMode === "basic"
+      ? " Safety Nudges managed access uses a scoped session token after onboarding, so ordinary analysis requests do not resend your activation code."
+      : "";
+
+  return `${analysisDisclosure}${managedClause} Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it.`;
 }
 
 function saveConfig(configPatch, options = {}) {
@@ -423,6 +448,7 @@ async function flushPendingSave() {
 }
 
 function openAdvancedScreen() {
+  state.previousScreen = state.screen;
   state.screen = "advanced";
   render();
 }
@@ -442,7 +468,19 @@ function openBasicSetupScreen() {
     ...state.config,
     setupMode: "basic"
   };
+  state.previousScreen = state.screen;
   state.screen = "basic-setup";
+  render();
+}
+
+function openDataUseScreen() {
+  state.previousScreen = state.screen;
+  state.screen = "data-use";
+  render();
+}
+
+function closeDataUseScreen() {
+  state.screen = state.previousScreen || (state.config.onboardingComplete ? "main" : "onboarding");
   render();
 }
 
@@ -767,6 +805,26 @@ if (completeBasicSetupButton) {
 
 if (openAdvancedSettingsButton) {
   openAdvancedSettingsButton.addEventListener("click", openAdvancedScreen);
+}
+
+if (openDataUseOnboardingButton) {
+  openDataUseOnboardingButton.addEventListener("click", openDataUseScreen);
+}
+
+if (openDataUseBasicButton) {
+  openDataUseBasicButton.addEventListener("click", openDataUseScreen);
+}
+
+if (openDataUseMainButton) {
+  openDataUseMainButton.addEventListener("click", openDataUseScreen);
+}
+
+if (openDataUseAdvancedButton) {
+  openDataUseAdvancedButton.addEventListener("click", openDataUseScreen);
+}
+
+if (closeDataUseButton) {
+  closeDataUseButton.addEventListener("click", closeDataUseScreen);
 }
 
 if (closeAdvancedSettingsButton) {

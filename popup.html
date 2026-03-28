@@ -252,11 +252,7 @@
           <button id="choose-basic-setup" class="choice-button" type="button">Use activation code</button>
           <button id="choose-advanced-setup" class="choice-button secondary" type="button">Advanced setup</button>
         </div>
-        <div class="card notice-card">
-          <h2>Data use</h2>
-          <p>When Safety Nudges is on, it sends the latest prompt and response from the supported chat page to the analysis provider you choose.</p>
-          <p>Safety Nudges does not send chat history to its own database unless you explicitly choose to submit feedback.</p>
-        </div>
+        <button id="open-data-use-onboarding" class="text-link" type="button">Learn about data use</button>
       </div>
 
       <div id="basic-setup-screen" class="screen" hidden>
@@ -277,11 +273,7 @@
           <button id="complete-basic-setup" class="action-button" type="button">Activate managed access</button>
           <p id="basic-setup-status" class="status-line" data-tone="muted">No activation attempt run yet.</p>
         </div>
-        <div class="card notice-card">
-          <h2>Data use</h2>
-          <p>In activation-code mode, Safety Nudges sends the latest prompt and response through Safety Nudges managed infrastructure so it can be analyzed with OpenAI.</p>
-          <p>Feedback is optional. Chat history is only sent to the Safety Nudges database if you later submit feedback and explicitly opt in.</p>
-        </div>
+        <button id="open-data-use-basic" class="text-link" type="button">Learn about data use</button>
       </div>
 
       <div id="main-screen" class="screen" hidden>
@@ -326,6 +318,7 @@
         </div>
 
         <button id="open-advanced-settings" class="text-link" type="button">Advanced settings</button>
+        <button id="open-data-use-main" class="text-link" type="button">Learn about data use</button>
       </div>
 
       <div id="advanced-screen" class="screen" hidden>
@@ -383,10 +376,17 @@
           <p id="advanced-connection-status" class="status-line" data-tone="muted">No advanced connection test run yet.</p>
         </div>
 
-        <div class="card notice-card">
+        <button id="open-data-use-advanced" class="text-link" type="button">Learn about data use</button>
+      </div>
+
+      <div id="data-use-screen" class="screen" hidden>
+        <div class="header-row">
           <h2>Data use</h2>
-          <p id="advanced-analysis-disclosure">When Safety Nudges is on, it sends the latest prompt and response to your selected analysis provider.</p>
-          <p>Do not treat feedback submission as anonymous if your chat text contains personal information. Feedback is optional and only reaches the Safety Nudges database if you explicitly submit it.</p>
+          <button id="close-data-use" class="back-button" type="button">Back</button>
+        </div>
+
+        <div class="card notice-card">
+          <p id="data-use-description">When Safety Nudges is on, it sends the latest prompt and response from the supported chat page to the selected analysis provider so it can generate a warning. If you use Safety Nudges managed access, those requests pass through Safety Nudges managed infrastructure using a scoped session token rather than your activation code. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it.</p>
         </div>
       </div>
     </div>
