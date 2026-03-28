@@ -15,6 +15,12 @@ const DEFAULT_API_CONFIG = {
   onboardingComplete: false,
   managedEmail: "",
   managedAccessKey: "",
+  managedSessionToken: "",
+  managedRefreshToken: "",
+  managedSessionExpiresAt: "",
+  managedRefreshExpiresAt: "",
+  managedAllocationId: "",
+  managedProviderProjectId: "",
   openAiApiKey: "",
   openAiModel: "gpt-5-mini",
   anthropicApiKey: "",
@@ -165,9 +171,186 @@ async function callSupabaseManagedAccess(action, payload = {}) {
   const raw = await response.json();
   if (!response.ok) {
     const message = raw && typeof raw.error === "string" ? raw.error : `Managed access request failed with HTTP ${response.status}.`;
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.errorCode = raw && typeof raw.error_code === "string" ? raw.error_code : null;
+    throw error;
   }
   return raw;
+}
+
+function isFutureTimestamp(value, minRemainingMs = 0) {
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+
+  const expiresAtMs = Date.parse(value);
+  if (!Number.isFinite(expiresAtMs)) {
+    return false;
+  }
+
+  return expiresAtMs - nowMs() > minRemainingMs;
+}
+
+function clearManagedSessionFields(config) {
+  return {
+    ...config,
+    managedEmail: "",
+    managedAccessKey: "",
+    managedSessionToken: "",
+    managedRefreshToken: "",
+    managedSessionExpiresAt: "",
+    managedRefreshExpiresAt: "",
+    managedAllocationId: "",
+    managedProviderProjectId: ""
+  };
+}
+
+function applyManagedSessionToConfig(config, response) {
+  const managedSession = response && response.managed_session && typeof response.managed_session === "object"
+    ? response.managed_session
+    : {};
+
+  return {
+    ...clearManagedSessionFields(config),
+    provider: response && response.provider ? response.provider : config.provider,
+    setupMode: "basic",
+    onboardingComplete: true,
+    openAiModel:
+      response && response.default_model
+        ? response.default_model
+        : config.openAiModel || DEFAULT_API_CONFIG.openAiModel,
+    managedSessionToken:
+      managedSession && typeof managedSession.session_token === "string" ? managedSession.session_token : "",
+    managedRefreshToken:
+      managedSession && typeof managedSession.refresh_token === "string" ? managedSession.refresh_token : "",
+    managedSessionExpiresAt:
+      managedSession && typeof managedSession.access_expires_at === "string" ? managedSession.access_expires_at : "",
+    managedRefreshExpiresAt:
+      managedSession && typeof managedSession.refresh_expires_at === "string" ? managedSession.refresh_expires_at : "",
+    managedAllocationId: response && typeof response.allocation_id === "string" ? response.allocation_id : "",
+    managedProviderProjectId:
+      response && typeof response.provider_project_id === "string" ? response.provider_project_id : ""
+  };
+}
+
+function extractManagedSessionMetadata(config) {
+  return {
+    allocationId: config.managedAllocationId || null,
+    providerProjectId: config.managedProviderProjectId || null,
+    accessExpiresAt: config.managedSessionExpiresAt || null,
+    refreshExpiresAt: config.managedRefreshExpiresAt || null
+  };
+}
+
+async function invalidateManagedSession(config, reason = null) {
+  const cleared = clearManagedSessionFields({
+    ...config,
+    onboardingComplete: normalizeSetupMode(config.setupMode) === "basic" ? false : config.onboardingComplete
+  });
+  await setStoredApiConfig(cleared);
+  logEvent("warn", "Managed session cleared locally", {
+    reason
+  });
+  return cleared;
+}
+
+async function exchangeManagedActivation(config) {
+  const managedEmail = typeof config.managedEmail === "string" ? config.managedEmail.trim().toLowerCase() : "";
+  const accessKey = typeof config.managedAccessKey === "string" ? config.managedAccessKey.trim() : "";
+  if (!managedEmail) {
+    throw new Error("Activation email is missing. Paste the email address that received the Safety Nudges activation code.");
+  }
+  if (!accessKey) {
+    throw new Error("Safety Nudges activation code is missing. Paste the code we provided to you.");
+  }
+
+  const activationResult = await callSupabaseManagedAccess("exchange_activation", {
+    email: managedEmail,
+    activation_code: accessKey
+  });
+  const hydratedConfig = applyManagedSessionToConfig(config, activationResult);
+  await setStoredApiConfig(hydratedConfig);
+  return hydratedConfig;
+}
+
+async function refreshManagedSession(config) {
+  const refreshToken = typeof config.managedRefreshToken === "string" ? config.managedRefreshToken.trim() : "";
+  if (!refreshToken) {
+    throw new Error("Managed refresh token is missing. Re-onboard with the activation code.");
+  }
+
+  const refreshResult = await callSupabaseManagedAccess("refresh_managed_session", {
+    refresh_token: refreshToken
+  });
+  const nextConfig = applyManagedSessionToConfig(config, refreshResult);
+  await setStoredApiConfig(nextConfig);
+  logEvent("info", "Managed session refreshed", extractManagedSessionMetadata(nextConfig));
+  return nextConfig;
+}
+
+async function ensureManagedSession(config, options = {}) {
+  const allowActivationExchange = Boolean(options.allowActivationExchange);
+  const refreshBufferMs = typeof options.refreshBufferMs === "number" ? options.refreshBufferMs : 60 * 1000;
+  const hasSessionToken = typeof config.managedSessionToken === "string" && config.managedSessionToken.trim();
+  if (hasSessionToken) {
+    if (isFutureTimestamp(config.managedSessionExpiresAt, refreshBufferMs)) {
+      return config;
+    }
+    if (typeof config.managedRefreshToken === "string" && config.managedRefreshToken.trim()) {
+      return await refreshManagedSession(config);
+    }
+  }
+
+  if (allowActivationExchange) {
+    return await exchangeManagedActivation(config);
+  }
+
+  throw new Error("Managed session is missing or expired. Re-onboard with the activation code.");
+}
+
+function isManagedSessionRetryableError(error) {
+  const errorCode = error && typeof error.errorCode === "string" ? error.errorCode : "";
+  return errorCode === "managed_session_expired" || errorCode === "managed_session_invalid";
+}
+
+function isManagedSessionTerminalError(error) {
+  const errorCode = error && typeof error.errorCode === "string" ? error.errorCode : "";
+  return (
+    errorCode === "managed_session_revoked" ||
+    errorCode === "managed_session_refresh_expired" ||
+    errorCode === "managed_session_invalid"
+  );
+}
+
+async function callManagedAccessWithSession(action, config, payload = {}, options = {}) {
+  let sessionConfig = await ensureManagedSession(config, options);
+  try {
+    const response = await callSupabaseManagedAccess(action, {
+      session_token: sessionConfig.managedSessionToken,
+      ...payload
+    });
+    return {
+      response,
+      config: sessionConfig
+    };
+  } catch (error) {
+    if (isManagedSessionRetryableError(error) && sessionConfig.managedRefreshToken) {
+      sessionConfig = await refreshManagedSession(sessionConfig);
+      const retryResponse = await callSupabaseManagedAccess(action, {
+        session_token: sessionConfig.managedSessionToken,
+        ...payload
+      });
+      return {
+        response: retryResponse,
+        config: sessionConfig
+      };
+    }
+    if (isManagedSessionTerminalError(error)) {
+      await invalidateManagedSession(sessionConfig, error instanceof Error ? error.message : "Managed session no longer valid.");
+    }
+    throw error;
+  }
 }
 
 function formatOllamaHttpError(response, errorText, endpoint) {
@@ -263,6 +446,8 @@ function getStoredApiConfig() {
         ...DEFAULT_API_CONFIG,
         ...(stored[PERSISTED_ANALYSIS_API_KEY] || {})
       };
+      merged.managedEmail = "";
+      merged.managedAccessKey = "";
       chrome.storage.session.get([SESSION_ANALYSIS_SECRETS_KEY], (sessionStored) => {
         const sessionSecrets = sessionStored[SESSION_ANALYSIS_SECRETS_KEY] || {};
         merged.openAiApiKey =
@@ -299,8 +484,12 @@ function getPersistedApiConfig(config) {
     identifySpans: config.identifySpans,
     setupMode: config.setupMode,
     onboardingComplete: config.onboardingComplete,
-    managedEmail: config.managedEmail,
-    managedAccessKey: config.managedAccessKey,
+    managedSessionToken: config.managedSessionToken,
+    managedRefreshToken: config.managedRefreshToken,
+    managedSessionExpiresAt: config.managedSessionExpiresAt,
+    managedRefreshExpiresAt: config.managedRefreshExpiresAt,
+    managedAllocationId: config.managedAllocationId,
+    managedProviderProjectId: config.managedProviderProjectId,
     openAiModel: config.openAiModel,
     anthropicModel: config.anthropicModel,
     openAiApiKey: "",
@@ -321,11 +510,35 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
     managedEmail:
       typeof config.managedEmail === "string"
         ? config.managedEmail.trim().toLowerCase()
-        : existing.managedEmail || DEFAULT_API_CONFIG.managedEmail,
+        : DEFAULT_API_CONFIG.managedEmail,
     managedAccessKey:
       typeof config.managedAccessKey === "string"
         ? config.managedAccessKey.trim()
-        : existing.managedAccessKey || DEFAULT_API_CONFIG.managedAccessKey,
+        : DEFAULT_API_CONFIG.managedAccessKey,
+    managedSessionToken:
+      typeof config.managedSessionToken === "string"
+        ? config.managedSessionToken.trim()
+        : existing.managedSessionToken || DEFAULT_API_CONFIG.managedSessionToken,
+    managedRefreshToken:
+      typeof config.managedRefreshToken === "string"
+        ? config.managedRefreshToken.trim()
+        : existing.managedRefreshToken || DEFAULT_API_CONFIG.managedRefreshToken,
+    managedSessionExpiresAt:
+      typeof config.managedSessionExpiresAt === "string"
+        ? config.managedSessionExpiresAt.trim()
+        : existing.managedSessionExpiresAt || DEFAULT_API_CONFIG.managedSessionExpiresAt,
+    managedRefreshExpiresAt:
+      typeof config.managedRefreshExpiresAt === "string"
+        ? config.managedRefreshExpiresAt.trim()
+        : existing.managedRefreshExpiresAt || DEFAULT_API_CONFIG.managedRefreshExpiresAt,
+    managedAllocationId:
+      typeof config.managedAllocationId === "string"
+        ? config.managedAllocationId.trim()
+        : existing.managedAllocationId || DEFAULT_API_CONFIG.managedAllocationId,
+    managedProviderProjectId:
+      typeof config.managedProviderProjectId === "string"
+        ? config.managedProviderProjectId.trim()
+        : existing.managedProviderProjectId || DEFAULT_API_CONFIG.managedProviderProjectId,
     openAiApiKey:
       typeof config.openAiApiKey === "string" && config.openAiApiKey.trim()
         ? config.openAiApiKey.trim()
@@ -367,12 +580,13 @@ function setStoredApiConfig(config) {
                 identifySpans: nextConfig.identifySpans,
                 setupMode: nextConfig.setupMode,
                 onboardingComplete: nextConfig.onboardingComplete,
-                managedEmail: nextConfig.managedEmail || null,
+                hasManagedSessionToken: Boolean(nextConfig.managedSessionToken),
+                hasManagedRefreshToken: Boolean(nextConfig.managedRefreshToken),
+                managedAllocationId: nextConfig.managedAllocationId || null,
                 openAiModel: nextConfig.openAiModel,
                 anthropicModel: nextConfig.anthropicModel,
                 hasOpenAiKey: Boolean(nextConfig.openAiApiKey),
-                hasAnthropicKey: Boolean(nextConfig.anthropicApiKey),
-                hasManagedAccessKey: Boolean(nextConfig.managedAccessKey)
+                hasAnthropicKey: Boolean(nextConfig.anthropicApiKey)
               });
               resolve();
             }
@@ -517,6 +731,15 @@ function classifyConnectionFailure(errorMessage) {
     );
   }
 
+  if (normalized.includes("managed session")) {
+    return buildFriendlyConnectionResult(
+      false,
+      "Connection test failed. Your managed Safety Nudges session expired or was revoked. Re-enter the activation code to continue.",
+      null,
+      "managed_session_invalid"
+    );
+  }
+
   if (normalized.includes("setup key") || normalized.includes("activation key") || normalized.includes("activation code")) {
     return buildFriendlyConnectionResult(
       false,
@@ -535,22 +758,11 @@ function classifyConnectionFailure(errorMessage) {
 }
 
 async function testManagedActivationConnection(config) {
-  const managedEmail = typeof config.managedEmail === "string" ? config.managedEmail.trim().toLowerCase() : "";
-  const accessKey = typeof config.managedAccessKey === "string" ? config.managedAccessKey.trim() : "";
-  if (!managedEmail) {
-    throw new Error("Activation email is missing. Paste the email address that received the Safety Nudges activation code.");
-  }
-  if (!accessKey) {
-    throw new Error("Safety Nudges activation code is missing. Paste the code we provided to you.");
-  }
-  const activationResult = await callSupabaseManagedAccess("exchange_activation", {
-    email: managedEmail,
-    activation_code: accessKey
+  const managedResult = await callManagedAccessWithSession("managed_openai_test", config, {}, {
+    allowActivationExchange: true
   });
-  const testResult = await callSupabaseManagedAccess("managed_openai_test", {
-    email: managedEmail,
-    activation_code: accessKey
-  });
+  const hydratedConfig = managedResult.config;
+  const testResult = managedResult.response;
   const rawText = extractOpenAiTextResponse(testResult.raw_response || {});
   try {
     JSON.parse(rawText);
@@ -558,29 +770,17 @@ async function testManagedActivationConnection(config) {
     throw new Error(`Managed OpenAI returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
   }
 
-  const hydratedConfig = {
-    ...config,
-    provider: activationResult.provider || "openai",
-    openAiModel: activationResult.default_model || config.openAiModel || DEFAULT_API_CONFIG.openAiModel,
-    onboardingComplete: true,
-    setupMode: "basic",
-    managedEmail,
-    managedAccessKey: accessKey
-  };
-  await setStoredApiConfig(hydratedConfig);
-
   const result = buildFriendlyConnectionResult(
     true,
     `Connection test succeeded. Managed ${hydratedConfig.provider === "openai" ? "OpenAI" : "provider"} access is ready.`,
     {
       provider: hydratedConfig.provider,
       model: hydratedConfig.openAiModel,
-      allocationId: activationResult.allocation_id || null,
-      providerProjectId: activationResult.provider_project_id || null
+      ...extractManagedSessionMetadata(hydratedConfig)
     },
     "managed_openai_success"
   );
-  logEvent("info", "Managed activation code verified via Supabase Edge Function", result.details);
+  logEvent("info", "Managed access session verified via Supabase Edge Function", result.details);
   return result;
 }
 
@@ -1723,11 +1923,6 @@ async function analyzeLatestTurn(payload, trace = null) {
       if (provider !== "openai") {
         throw new Error("Managed activation-code mode currently supports OpenAI only.");
       }
-      const managedEmail = typeof config.managedEmail === "string" ? config.managedEmail.trim().toLowerCase() : "";
-      const accessKey = typeof config.managedAccessKey === "string" ? config.managedAccessKey.trim() : "";
-      if (!managedEmail || !accessKey) {
-        throw new Error("Managed activation is missing email or activation code.");
-      }
       const requestBody = {
         model: config.openAiModel || DEFAULT_API_CONFIG.openAiModel,
         input: buildOpenAiMessages(payload),
@@ -1745,13 +1940,13 @@ async function analyzeLatestTurn(payload, trace = null) {
       logEvent("info", "Sending managed OpenAI analysis relay request", {
         requestId: trace ? trace.requestId : null,
         model: requestBody.model,
-        conversationId: payload.conversationId || null
+        conversationId: payload.conversationId || null,
+        ...extractManagedSessionMetadata(config)
       });
-      const relayResponse = await callSupabaseManagedAccess("managed_openai_analyze", {
-        email: managedEmail,
-        activation_code: accessKey,
+      const managedResult = await callManagedAccessWithSession("managed_openai_analyze", config, {
         analysis_payload: requestBody
       });
+      const relayResponse = managedResult.response;
       const rawResponse = relayResponse.raw_response || {};
       const rawText = extractOpenAiTextResponse(rawResponse);
       logEvent("info", "Received managed OpenAI analysis response", {

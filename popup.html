@@ -273,8 +273,9 @@
             <label for="managed-key">Safety Nudges activation code</label>
             <input id="managed-key" type="password" placeholder="AB12CD34">
           </div>
-          <p class="tiny">Enter the activation email and Safety Nudges activation code from your onboarding email to finish setup.</p>
-          <button id="complete-basic-setup" class="action-button" type="button">Continue</button>
+          <p class="tiny">Enter the activation email and Safety Nudges activation code from your onboarding email. Safety Nudges exchanges them once for a managed session and does not keep the raw activation code locally after setup.</p>
+          <button id="complete-basic-setup" class="action-button" type="button">Activate managed access</button>
+          <p id="basic-setup-status" class="status-line" data-tone="muted">No activation attempt run yet.</p>
         </div>
         <div class="card notice-card">
           <h2>Data use</h2>
@@ -336,7 +337,7 @@
         <div class="card stack">
           <div class="screen-title">
             <h2>Safety Nudges activation code</h2>
-            <p class="tiny">If you were given a Safety Nudges activation code, you can paste or replace it here later.</p>
+            <p class="tiny">Use this only to create or replace the managed session. The raw activation email and code are not kept locally after exchange.</p>
           </div>
           <div class="field">
             <label for="managed-email-advanced">Activation email</label>

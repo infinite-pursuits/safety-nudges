@@ -21,7 +21,7 @@ Using Anthropic:
 
 Using the popup:
 - On first run, users choose between `Use activation code` and `Advanced setup`.
-- `Use activation code` exchanges the user's email plus Safety Nudges activation code with the hosted Supabase Edge Function and keeps managed access persisted locally for later sessions.
+- `Use activation code` exchanges the user's email plus Safety Nudges activation code with the hosted Supabase Edge Function, receives a scoped managed session, and persists only that managed session locally for later sessions.
 - `Advanced setup` keeps manual OpenAI and Anthropic API key entry available, but those manual provider keys are kept only for the current browser session.
 - After setup, the main screen exposes only three provider choices: `OpenAI`, `Anthropic`, and `Complementary provider` (`OpenAI` on `claude.ai`, `Anthropic` on `chatgpt.com`).
 - Settings save automatically when changed.

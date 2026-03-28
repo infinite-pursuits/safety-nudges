@@ -5,6 +5,12 @@ const DEFAULT_CONFIG = {
   onboardingComplete: false,
   managedEmail: "",
   managedAccessKey: "",
+  managedSessionToken: "",
+  managedRefreshToken: "",
+  managedSessionExpiresAt: "",
+  managedRefreshExpiresAt: "",
+  managedAllocationId: "",
+  managedProviderProjectId: "",
   openAiApiKey: "",
   openAiModel: "gpt-5-mini",
   anthropicApiKey: "",
@@ -25,6 +31,7 @@ const managedEmailNode = document.getElementById("managed-email");
 const managedEmailAdvancedNode = document.getElementById("managed-email-advanced");
 const managedKeyNode = document.getElementById("managed-key");
 const managedKeyAdvancedNode = document.getElementById("managed-key-advanced");
+const basicSetupStatusNode = document.getElementById("basic-setup-status");
 const providerRadioNodes = Array.from(document.querySelectorAll('input[name="provider-selection"]'));
 const testConnectionButton = document.getElementById("test-connection");
 const connectionStatusNode = document.getElementById("connection-status");
@@ -59,6 +66,10 @@ const state = {
   advancedConnectionStatus: {
     tone: "muted",
     message: "No advanced connection test run yet."
+  },
+  basicSetupStatus: {
+    tone: "muted",
+    message: "No activation attempt run yet."
   }
 };
 
@@ -86,6 +97,11 @@ function setConnectionStatus(message, tone = "muted") {
 
 function setAdvancedConnectionStatus(message, tone = "muted") {
   state.advancedConnectionStatus = { message, tone };
+  render();
+}
+
+function setBasicSetupStatus(message, tone = "muted") {
+  state.basicSetupStatus = { message, tone };
   render();
 }
 
@@ -294,6 +310,10 @@ function render() {
     advancedConnectionStatusNode.textContent = state.advancedConnectionStatus.message;
     advancedConnectionStatusNode.dataset.tone = state.advancedConnectionStatus.tone;
   }
+  if (basicSetupStatusNode) {
+    basicSetupStatusNode.textContent = state.basicSetupStatus.message;
+    basicSetupStatusNode.dataset.tone = state.basicSetupStatus.tone;
+  }
 
   if (toggleEnabledButton) {
     toggleEnabledButton.dataset.enabled = state.config.enabled ? "true" : "false";
@@ -458,6 +478,14 @@ function sendConnectionTestRequest(config) {
   });
 }
 
+function loadConfigFromBackground() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "SAFETY_NUDGES_GET_API_CONFIG" }, (response) => {
+      resolve(response && response.ok && response.config ? response.config : DEFAULT_CONFIG);
+    });
+  });
+}
+
 async function runMainConnectionTest() {
   state.isTestingConnection = true;
   render();
@@ -526,7 +554,16 @@ async function runAdvancedConnectionTest() {
   const checks = [];
   if ((state.config.managedAccessKey || "").trim() && (state.config.managedEmail || "").trim()) {
     checks.push({
-      label: "Safety Nudges activation code",
+      label: "Safety Nudges managed access",
+      config: {
+        ...state.config,
+        setupMode: "basic",
+        onboardingComplete: true
+      }
+    });
+  } else if ((state.config.managedSessionToken || "").trim() && (state.config.managedRefreshToken || "").trim()) {
+    checks.push({
+      label: "Safety Nudges managed session",
       config: {
         ...state.config,
         setupMode: "basic",
@@ -562,7 +599,7 @@ async function runAdvancedConnectionTest() {
     stopFastActivityPolling();
     state.isTestingConnection = false;
     render();
-    setAdvancedConnectionStatus("❌ No activation email + Safety Nudges activation code or API keys are available to test.", "error");
+    setAdvancedConnectionStatus("❌ No managed session, activation email + code, or API keys are available to test.", "error");
     return;
   }
 
@@ -621,19 +658,62 @@ function chooseBasicSetup() {
   openBasicSetupScreen();
 }
 
-function completeBasicSetup() {
+async function completeBasicSetup() {
   const accessKey = managedKeyNode ? managedKeyNode.value.trim() : "";
   const managedEmail = managedEmailNode ? managedEmailNode.value.trim().toLowerCase() : "";
-  state.config = {
+  if (!managedEmail || !accessKey) {
+    setBasicSetupStatus("❌ Enter both the activation email and activation code.", "error");
+    return;
+  }
+
+  state.isTestingConnection = true;
+  render();
+  setPendingActivity("Managed activation exchange started", {
+    setupMode: "basic"
+  });
+  setBasicSetupStatus("Activating managed access...", "muted");
+  startFastActivityPolling();
+
+  const onboardingConfig = {
     ...state.config,
     setupMode: "basic",
     onboardingComplete: true,
     managedEmail,
     managedAccessKey: accessKey
   };
+  const { response, runtimeError } = await sendConnectionTestRequest(onboardingConfig);
+
+  clearPendingActivity();
+  stopFastActivityPolling();
+  state.isTestingConnection = false;
+
+  if (runtimeError) {
+    render();
+    setBasicSetupStatus(`❌ Activation failed. ${runtimeError}`, "error");
+    refreshRuntimeStatus();
+    return;
+  }
+
+  if (!response || !response.ok) {
+    const message =
+      response && response.result && response.result.message
+        ? response.result.message
+        : response && response.error
+          ? response.error
+          : "Activation failed.";
+    render();
+    setBasicSetupStatus(`❌ ${message}`, "error");
+    refreshRuntimeStatus();
+    return;
+  }
+
+  const refreshedConfig = await loadConfigFromBackground();
+  state.config = normalizeLoadedConfig(refreshedConfig);
   state.screen = "main";
   render();
-  void saveConfig(state.config).catch((_error) => {});
+  setConnectionStatus(`✅ ${response.result && response.result.message ? response.result.message : "Managed access is ready."}`, "success");
+  setBasicSetupStatus("✅ Managed access is ready.", "success");
+  refreshRuntimeStatus();
 }
 
 function attachFieldAutoSave(node, eventName = "input") {
