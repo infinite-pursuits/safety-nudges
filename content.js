@@ -957,6 +957,9 @@ function closeAllResponsePanels(exceptFingerprint = null) {
       panel.hidden = !shouldStayOpen;
       if (!shouldStayOpen) {
         panel.style.maxHeight = "";
+        panel.style.maxWidth = "";
+        panel.style.left = "";
+        panel.style.right = "";
         panel.style.top = "";
         panel.style.bottom = "";
       }
@@ -978,6 +981,23 @@ function shouldIgnoreViewportBlocker(element) {
 
   const tagName = element.tagName.toLowerCase();
   return tagName === "html" || tagName === "body";
+}
+
+function isFixedOrStickyElement(element) {
+  if (!(element instanceof Element) || shouldIgnoreViewportBlocker(element)) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  return style.position === "fixed" || style.position === "sticky";
+}
+
+function isSideViewportBlocker(rect) {
+  if (!rect || rect.width < 40 || rect.height < 80) {
+    return false;
+  }
+
+  return rect.width <= window.innerWidth * 0.55 && rect.bottom > 0 && rect.top < window.innerHeight;
 }
 
 function getViewportBottomLimit(anchorRect) {
@@ -1013,6 +1033,102 @@ function getViewportBottomLimit(anchorRect) {
   }
 
   return obstructionTop;
+}
+
+function getViewportLeftLimit(anchorRect) {
+  const fallbackLeft = 0;
+  const sideCandidates = Array.from(document.querySelectorAll("body *")).filter((element) => {
+    if (!isFixedOrStickyElement(element)) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (!isSideViewportBlocker(rect)) {
+      return false;
+    }
+
+    return rect.left <= 24 && rect.right > 0;
+  });
+  const directLeftLimit = sideCandidates.reduce((maxRight, element) => {
+    const rect = element.getBoundingClientRect();
+    return Math.max(maxRight, rect.right);
+  }, fallbackLeft);
+
+  const sampleYs = Array.from(
+    new Set([
+      Math.max(8, Math.min(window.innerHeight - 8, anchorRect.top + 16)),
+      Math.max(8, Math.min(window.innerHeight - 8, anchorRect.top + anchorRect.height / 2)),
+      Math.max(8, Math.min(window.innerHeight - 8, anchorRect.bottom - 16)),
+      Math.max(8, Math.min(window.innerHeight - 8, window.innerHeight / 2))
+    ])
+  );
+
+  let obstructionRight = fallbackLeft;
+  for (const y of sampleYs) {
+    const stack = document.elementsFromPoint(8, y);
+    for (const element of stack) {
+      if (!isFixedOrStickyElement(element)) {
+        continue;
+      }
+
+      const rect = element.getBoundingClientRect();
+      if (!isSideViewportBlocker(rect) || rect.left > 24 || rect.right <= 0) {
+        continue;
+      }
+
+      obstructionRight = Math.max(obstructionRight, rect.right);
+    }
+  }
+
+  return Math.max(directLeftLimit, obstructionRight);
+}
+
+function getViewportRightLimit(anchorRect) {
+  const fallbackRight = window.innerWidth;
+  const sideCandidates = Array.from(document.querySelectorAll("body *")).filter((element) => {
+    if (!isFixedOrStickyElement(element)) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (!isSideViewportBlocker(rect)) {
+      return false;
+    }
+
+    return rect.right >= window.innerWidth - 24 && rect.left < window.innerWidth;
+  });
+  const directRightLimit = sideCandidates.reduce((minLeft, element) => {
+    const rect = element.getBoundingClientRect();
+    return Math.min(minLeft, rect.left);
+  }, fallbackRight);
+
+  const sampleYs = Array.from(
+    new Set([
+      Math.max(8, Math.min(window.innerHeight - 8, anchorRect.top + 16)),
+      Math.max(8, Math.min(window.innerHeight - 8, anchorRect.top + anchorRect.height / 2)),
+      Math.max(8, Math.min(window.innerHeight - 8, anchorRect.bottom - 16)),
+      Math.max(8, Math.min(window.innerHeight - 8, window.innerHeight / 2))
+    ])
+  );
+
+  let obstructionLeft = fallbackRight;
+  for (const y of sampleYs) {
+    const stack = document.elementsFromPoint(Math.max(1, window.innerWidth - 8), y);
+    for (const element of stack) {
+      if (!isFixedOrStickyElement(element)) {
+        continue;
+      }
+
+      const rect = element.getBoundingClientRect();
+      if (!isSideViewportBlocker(rect) || rect.right < window.innerWidth - 24 || rect.left >= window.innerWidth) {
+        continue;
+      }
+
+      obstructionLeft = Math.min(obstructionLeft, rect.left);
+    }
+  }
+
+  return Math.min(directRightLimit, obstructionLeft);
 }
 
 function getViewportTopLimit(anchorRect) {
@@ -1096,8 +1212,12 @@ function updateResponsePanelPlacement(anchor) {
   const panelRect = panel.getBoundingClientRect();
   const viewportTopLimit = getViewportTopLimit(anchorRect);
   const viewportBottomLimit = getViewportBottomLimit(anchorRect);
+  const viewportLeftLimit = getViewportLeftLimit(anchorRect);
+  const viewportRightLimit = getViewportRightLimit(anchorRect);
   const safeTop = viewportTopLimit + margin;
   const safeBottom = Math.max(margin, viewportBottomLimit - margin);
+  const safeLeft = viewportLeftLimit + margin;
+  const safeRight = Math.max(safeLeft, viewportRightLimit - margin);
   const visibleAnchorTop = Math.min(anchorRect.top, safeBottom);
   const availableAbove = Math.max(0, visibleAnchorTop - safeTop - gap);
   const availableBelow = Math.max(0, safeBottom - anchorRect.bottom - gap);
@@ -1116,6 +1236,13 @@ function updateResponsePanelPlacement(anchor) {
   }
 
   anchor.dataset.placement = placement;
+  panel.style.maxWidth = `${Math.max(0, Math.floor(safeRight - safeLeft))}px`;
+  const constrainedPanelWidth = panel.getBoundingClientRect().width || panelRect.width;
+  const defaultLeft = anchorRect.right - constrainedPanelWidth;
+  const maxLeft = Math.max(safeLeft, safeRight - constrainedPanelWidth);
+  const clampedLeft = Math.min(Math.max(defaultLeft, safeLeft), maxLeft);
+  panel.style.left = `${Math.round(clampedLeft - anchorRect.left)}px`;
+  panel.style.right = "auto";
   panel.style.maxHeight = `${Math.max(0, Math.floor(maxHeight))}px`;
   if (placement === "below") {
     panel.style.top = `${anchor.offsetHeight + gap}px`;
