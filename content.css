@@ -101,6 +101,15 @@
   display: flex;
   justify-content: flex-end;
   margin-top: 12px;
+  direction: ltr;
+  text-align: left;
+  font-family: var(--safety-nudges-font-family, "SF Pro Text", "Segoe UI", sans-serif);
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  writing-mode: horizontal-tb;
+  unicode-bidi: isolate;
 }
 
 .safety-nudges-response-chip {
@@ -122,6 +131,10 @@
   line-height: 1.2;
   max-width: min(300px, calc(100vw - 48px));
   z-index: 2;
+  direction: ltr;
+  text-align: left;
+  writing-mode: horizontal-tb;
+  unicode-bidi: isolate;
 }
 
 .safety-nudges-response-chip[data-severity="none"] {
@@ -181,6 +194,10 @@
   z-index: 3;
   overflow-y: auto;
   overscroll-behavior: contain;
+  direction: ltr;
+  text-align: left;
+  writing-mode: horizontal-tb;
+  unicode-bidi: isolate;
 }
 
 .safety-nudges-inline-highlight {
@@ -228,6 +245,10 @@
   visibility: hidden;
   transition: opacity 120ms ease;
   z-index: 5;
+  direction: ltr;
+  text-align: left;
+  writing-mode: horizontal-tb;
+  unicode-bidi: isolate;
 }
 
 .safety-nudges-floating-tooltip[data-placement="below"] {

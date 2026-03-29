@@ -451,6 +451,47 @@ function getConversationId() {
   return adapter ? adapter.getConversationId() : null;
 }
 
+function getResponseUiFontFallback() {
+  const adapter = getActiveSurfaceAdapter();
+  if (adapter && adapter.id === "claude") {
+    return 'ui-sans-serif, system-ui, sans-serif';
+  }
+
+  if (adapter && adapter.id === "fixture" && getFixtureSurfaceType() === "claude") {
+    return 'ui-sans-serif, system-ui, sans-serif';
+  }
+
+  if (adapter && adapter.id === "fixture") {
+    return '"IBM Plex Sans", "Segoe UI", sans-serif';
+  }
+
+  return '"SF Pro Text", "Segoe UI", sans-serif';
+}
+
+function getResponseUiFontFamily(responseNode) {
+  const candidates = [responseNode, responseNode && responseNode.parentElement, document.body, document.documentElement];
+  for (const candidate of candidates) {
+    if (!(candidate instanceof Element)) {
+      continue;
+    }
+
+    const fontFamily = window.getComputedStyle(candidate).fontFamily;
+    if (fontFamily && fontFamily.trim()) {
+      return fontFamily;
+    }
+  }
+
+  return getResponseUiFontFallback();
+}
+
+function applyResponseAnchorTheme(anchor, responseNode) {
+  if (!(anchor instanceof HTMLElement)) {
+    return;
+  }
+
+  anchor.style.setProperty("--safety-nudges-font-family", getResponseUiFontFamily(responseNode));
+}
+
 function applyStoredAnalysisConfig(config) {
   if (!config || typeof config !== "object") {
     return;
@@ -1406,6 +1447,8 @@ function ensureResponseAnchor(responseNode, fingerprint) {
 
     responseNode.appendChild(anchor);
   }
+
+  applyResponseAnchorTheme(anchor, responseNode);
 
   return anchor;
 }
