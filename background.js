@@ -374,70 +374,6 @@ async function callManagedAccessWithSession(action, config, payload = {}, option
   }
 }
 
-async function validateManagedSessionState(config) {
-  if (normalizeSetupMode(config.setupMode) !== "basic" || !config.onboardingComplete) {
-    return {
-      ok: true,
-      config
-    };
-  }
-
-  const hasSessionToken = typeof config.managedSessionToken === "string" && config.managedSessionToken.trim();
-  const hasRefreshToken = typeof config.managedRefreshToken === "string" && config.managedRefreshToken.trim();
-  if (!hasSessionToken && !hasRefreshToken) {
-    return {
-      ok: false,
-      config: await invalidateManagedSession(config, "Managed session missing at popup startup.")
-    };
-  }
-
-  let nextConfig = config;
-  try {
-    if (!hasSessionToken && hasRefreshToken) {
-      nextConfig = await refreshManagedSession(config);
-    }
-
-    await callSupabaseManagedAccess("validate_managed_session", {
-      session_token: nextConfig.managedSessionToken
-    });
-    return {
-      ok: true,
-      config: nextConfig
-    };
-  } catch (error) {
-    if (isManagedSessionRetryableError(error) && nextConfig.managedRefreshToken) {
-      const refreshedConfig = await refreshManagedSession(nextConfig);
-      try {
-        await callSupabaseManagedAccess("validate_managed_session", {
-          session_token: refreshedConfig.managedSessionToken
-        });
-        return {
-          ok: true,
-          config: refreshedConfig
-        };
-      } catch (retryError) {
-        if (isManagedSessionTerminalError(retryError) || isManagedSessionRetryableError(retryError)) {
-          return {
-            ok: false,
-            config: await invalidateManagedSession(
-              refreshedConfig,
-              retryError instanceof Error ? retryError.message : "Managed session no longer valid."
-            )
-          };
-        }
-        throw retryError;
-      }
-    }
-
-    if (isManagedSessionTerminalError(error) || isManagedSessionRetryableError(error)) {
-      return {
-        ok: false,
-        config: await invalidateManagedSession(config, error instanceof Error ? error.message : "Managed session no longer valid.")
-      };
-    }
-    throw error;
-  }
-}
 
 function formatOllamaHttpError(response, errorText, endpoint) {
   const truncatedText = (errorText || "").slice(0, 300);
@@ -2222,25 +2158,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         config
       });
     });
-    return true;
-  }
-
-  if (message.type === "SAFETY_NUDGES_VALIDATE_MANAGED_SESSION") {
-    void getStoredApiConfig()
-      .then((config) => validateManagedSessionState(config))
-      .then((result) => {
-        sendResponse({
-          ok: true,
-          valid: result.ok,
-          config: result.config
-        });
-      })
-      .catch((error) => {
-        sendResponse({
-          ok: false,
-          error: error instanceof Error ? error.message : "Unknown managed-session validation error"
-        });
-      });
     return true;
   }
 

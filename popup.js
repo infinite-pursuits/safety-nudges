@@ -536,14 +536,6 @@ function loadConfigFromBackground() {
   });
 }
 
-function validateManagedSessionOnStartup() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "SAFETY_NUDGES_VALIDATE_MANAGED_SESSION" }, (response) => {
-      resolve(response || null);
-    });
-  });
-}
-
 async function runMainConnectionTest() {
   state.isTestingConnection = true;
   render();
@@ -793,16 +785,8 @@ function attachFieldAutoSave(node, eventName = "input") {
 }
 
 void loadConfigFromBackground()
-  .then(async (loadedConfig) => {
-    let nextConfig = normalizeLoadedConfig(loadedConfig);
-    if (nextConfig.setupMode === "basic" && nextConfig.onboardingComplete) {
-      const validation = await validateManagedSessionOnStartup();
-      if (validation && validation.ok && validation.config) {
-        nextConfig = normalizeLoadedConfig(validation.config);
-      }
-    }
-
-    state.config = nextConfig;
+  .then((loadedConfig) => {
+    state.config = normalizeLoadedConfig(loadedConfig);
     state.loaded = true;
     state.screen = state.config.onboardingComplete ? "main" : "onboarding";
     render();

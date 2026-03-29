@@ -2043,6 +2043,20 @@ function maybeLogSpanDisplayMessage(payload, result, highlightDiagnostics) {
   }, "warn");
 }
 
+function formatAnalysisFailureMessage(message) {
+  const normalized = typeof message === "string" ? message.toLowerCase() : "";
+  if (
+    normalized.includes("managed session") ||
+    normalized.includes("managed refresh token") ||
+    normalized.includes("managed access has been revoked") ||
+    normalized.includes("re-onboard with the activation code")
+  ) {
+    return "Managed access expired. Open Safety Nudges and re-enter your activation code.";
+  }
+
+  return message || "Safety Nudges could not analyze this response.";
+}
+
 function renderIssueList(listNode, result) {
   listNode.replaceChildren();
 
@@ -2210,7 +2224,7 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
 
   if (analysisState.status === "error") {
     chipText.textContent = "Analysis failed";
-    summary.textContent = analysisState.message || "Safety Nudges could not analyze this response.";
+    summary.textContent = formatAnalysisFailureMessage(analysisState.message);
     issueList.replaceChildren();
     renderFeedbackSection(anchor, getFeedbackState(fingerprint), analysisState);
     return;
