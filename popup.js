@@ -536,6 +536,14 @@ function loadConfigFromBackground() {
   });
 }
 
+function validateManagedSessionOnStartup() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "SAFETY_NUDGES_VALIDATE_MANAGED_SESSION" }, (response) => {
+      resolve(response || null);
+    });
+  });
+}
+
 async function runMainConnectionTest() {
   state.isTestingConnection = true;
   render();
@@ -784,14 +792,29 @@ function attachFieldAutoSave(node, eventName = "input") {
   });
 }
 
-chrome.runtime.sendMessage({ type: "SAFETY_NUDGES_GET_API_CONFIG" }, (response) => {
-  const loadedConfig = response && response.ok && response.config ? response.config : DEFAULT_CONFIG;
-  state.config = normalizeLoadedConfig(loadedConfig);
-  state.loaded = true;
-  state.screen = state.config.onboardingComplete ? "main" : "onboarding";
-  render();
-  refreshRuntimeStatus();
-});
+void loadConfigFromBackground()
+  .then(async (loadedConfig) => {
+    let nextConfig = normalizeLoadedConfig(loadedConfig);
+    if (nextConfig.setupMode === "basic" && nextConfig.onboardingComplete) {
+      const validation = await validateManagedSessionOnStartup();
+      if (validation && validation.ok && validation.config) {
+        nextConfig = normalizeLoadedConfig(validation.config);
+      }
+    }
+
+    state.config = nextConfig;
+    state.loaded = true;
+    state.screen = state.config.onboardingComplete ? "main" : "onboarding";
+    render();
+    refreshRuntimeStatus();
+  })
+  .catch(() => {
+    state.config = { ...DEFAULT_CONFIG };
+    state.loaded = true;
+    state.screen = "onboarding";
+    render();
+    refreshRuntimeStatus();
+  });
 
 providerRadioNodes.forEach((node) => {
   attachFieldAutoSave(node, "change");
