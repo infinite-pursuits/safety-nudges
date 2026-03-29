@@ -1,4 +1,4 @@
-importScripts("tagging_prompt_v1.js");
+importScripts("tagging_prompt.js");
 
 const DEFAULT_ANALYSIS_RESULT = {
   issueDetected: false,
@@ -790,8 +790,8 @@ function buildAnalysisPromptParts(payload) {
     { role: "user", content: payload && payload.prompt ? payload.prompt : "" },
     { role: "assistant", content: payload && payload.response ? payload.response : "" }
   ];
-  const systemPrompt = TAGGING_PROMPT_V1.systemPrompt;
-  const userPrompt = TAGGING_PROMPT_V1.renderUserPrompt(conversationHash, conversation);
+  const systemPrompt = TAGGING_PROMPT.systemPrompt;
+  const userPrompt = TAGGING_PROMPT.renderUserPrompt(conversationHash, conversation);
 
   return {
     systemPrompt,
@@ -800,7 +800,7 @@ function buildAnalysisPromptParts(payload) {
 }
 
 function buildOpenAiMessages(payload) {
-  return TAGGING_PROMPT_V1.buildLatestTurnMessages(
+  return TAGGING_PROMPT.buildLatestTurnMessages(
     payload.prompt || "",
     payload.response || "",
     payload.conversationId || "extension-latest-turn"
