@@ -692,7 +692,7 @@ function buildFeedbackPayload(payload, fingerprint, analysisState, feedbackState
     chat_history: readConversationTranscript(),
     flags: {
       mock_submission: false,
-      transport: "supabase_rest_v1",
+      transport: "supabase_rest",
       anti_spam_rule: "one_submission_per_judgment",
       comment_max_chars: FEEDBACK_COMMENT_MAX_CHARS
     }
