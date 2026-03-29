@@ -291,6 +291,18 @@ async function refreshManagedSession(config) {
 
 async function ensureManagedSession(config, options = {}) {
   const allowActivationExchange = Boolean(options.allowActivationExchange);
+  const hasActivationCredentials =
+    typeof config.managedEmail === "string" &&
+    config.managedEmail.trim() &&
+    typeof config.managedAccessKey === "string" &&
+    config.managedAccessKey.trim();
+
+  // When the user has explicitly provided an activation email + code, prefer
+  // exchanging that fresh credential pair over reusing a stale cached session.
+  if (allowActivationExchange && hasActivationCredentials) {
+    return await exchangeManagedActivation(config);
+  }
+
   const refreshBufferMs = typeof options.refreshBufferMs === "number" ? options.refreshBufferMs : 60 * 1000;
   const hasSessionToken = typeof config.managedSessionToken === "string" && config.managedSessionToken.trim();
   if (hasSessionToken) {
@@ -324,7 +336,16 @@ function isManagedSessionTerminalError(error) {
 }
 
 async function callManagedAccessWithSession(action, config, payload = {}, options = {}) {
-  let sessionConfig = await ensureManagedSession(config, options);
+  let sessionConfig;
+  try {
+    sessionConfig = await ensureManagedSession(config, options);
+  } catch (error) {
+    if (isManagedSessionTerminalError(error)) {
+      await invalidateManagedSession(config, error instanceof Error ? error.message : "Managed session no longer valid.");
+    }
+    throw error;
+  }
+
   try {
     const response = await callSupabaseManagedAccess(action, {
       session_token: sessionConfig.managedSessionToken,

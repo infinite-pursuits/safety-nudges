@@ -484,6 +484,18 @@ function closeDataUseScreen() {
   render();
 }
 
+async function reloadConfigAndRoute() {
+  const refreshedConfig = await loadConfigFromBackground();
+  state.config = normalizeLoadedConfig(refreshedConfig);
+  state.screen = state.config.onboardingComplete ? "main" : "onboarding";
+  render();
+}
+
+async function handleManagedSessionInvalidation() {
+  await reloadConfigAndRoute();
+  setBasicSetupStatus("Enter your activation email and code to reconnect managed access.", "muted");
+}
+
 function handleConnectionTestResult(response) {
   const result = response && response.result ? response.result : null;
   if (response && response.ok && result) {
@@ -559,6 +571,10 @@ async function runMainConnectionTest() {
     setConnectionStatus(`❌ Connection test failed. ${runtimeError}`, "error");
     refreshRuntimeStatus();
     return;
+  }
+
+  if (response && response.result && response.result.reasonCode === "managed_session_invalid") {
+    await handleManagedSessionInvalidation();
   }
 
   handleConnectionTestResult(response);
@@ -661,6 +677,9 @@ async function runAdvancedConnectionTest() {
           : response && response.error
             ? response.error
             : "Connection test failed.";
+      if (response && response.result && response.result.reasonCode === "managed_session_invalid") {
+        await handleManagedSessionInvalidation();
+      }
       clearPendingActivity();
       stopFastActivityPolling();
       state.isTestingConnection = false;
