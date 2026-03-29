@@ -5,7 +5,7 @@ This directory contains the active Step 2 Chrome extension baseline.
 What is implemented:
 - Manifest V3 extension wiring for ChatGPT surfaces (`chatgpt.com` and `chat.openai.com`) plus Claude web (`claude.ai`).
 - A background service worker that can call OpenAI directly, call Anthropic directly, or route managed access through Supabase, then normalize Step 1-style results.
-- A content script with host adapters for ChatGPT-style and Claude-style DOMs that waits for a quiet period after mutations and extracts the latest user prompt plus assistant response.
+- A content script with host adapters for ChatGPT-style and Claude-style DOMs that waits for a quiet period after mutations and extracts the latest user prompt plus assistant response together with a bounded recent-history window.
 - A small lower-right in-page nudge that stays hidden unless an issue is detected (or debug mode is enabled).
 - A judgments-panel feedback flow with thumbs up/down, an optional short comment, an explicit consent checkbox, and direct Supabase persistence for submitted feedback.
 - A popup redesigned around nontechnical use: first-run activation-code vs advanced setup, a simple provider selector, a prominent play/pause control, and an advanced screen for manual OpenAI/Anthropic keys and logs.

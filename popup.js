@@ -363,18 +363,18 @@ function render() {
 function buildAnalysisDisclosure(config) {
   const setupMode = config && config.setupMode === "basic" ? "basic" : "advanced";
   if (setupMode === "basic") {
-    return "When Safety Nudges is on, it sends the latest prompt and response through Safety Nudges managed infrastructure so OpenAI can analyze it.";
+    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure so OpenAI can analyze it.";
   }
 
   if (config && config.provider === "anthropic") {
-    return "When Safety Nudges is on, it sends the latest prompt and response to Anthropic for analysis.";
+    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to Anthropic for analysis.";
   }
 
   if (config && config.provider === "complementary") {
-    return "When Safety Nudges is on, it sends the latest prompt and response to Anthropic on chatgpt.com and to OpenAI on claude.ai.";
+    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to Anthropic on chatgpt.com and to OpenAI on claude.ai.";
   }
 
-  return "When Safety Nudges is on, it sends the latest prompt and response to OpenAI for analysis.";
+  return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenAI for analysis.";
 }
 
 function buildDataUseDescription(config) {

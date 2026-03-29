@@ -34,6 +34,10 @@ const ANTHROPIC_API_VERSION = "2023-06-01";
 const DEFAULT_LOCAL_ANALYSIS_ENDPOINT = "http://127.0.0.1:8787/analyze";
 const DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/chat";
 const DEFAULT_OLLAMA_MODEL = "llama3.1:8b";
+const ANALYSIS_REQUEST_SCHEMA_VERSION = "1.1.0";
+const ANALYSIS_HISTORY_MAX_MESSAGES = 12;
+const ANALYSIS_HISTORY_MAX_CHARS_PER_MESSAGE = 4000;
+const ANALYSIS_HISTORY_MAX_TOTAL_CHARS = 12000;
 
 const MAX_ACTIVITY_LOGS = 40;
 const NETWORK_TIMEOUT_MS = 30000;
@@ -619,27 +623,134 @@ function setStoredApiConfig(config) {
   });
 }
 
-function buildAnalysisRequest(payload) {
+function truncateAnalysisMessageContent(value, maxChars = ANALYSIS_HISTORY_MAX_CHARS_PER_MESSAGE) {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!text) {
+    return "";
+  }
+
+  if (typeof maxChars !== "number" || !Number.isFinite(maxChars) || maxChars < 8 || text.length <= maxChars) {
+    return text;
+  }
+
+  return `${text.slice(0, Math.max(0, maxChars - 4)).trimEnd()} ...`;
+}
+
+function normalizeConversationMessage(message, maxChars = ANALYSIS_HISTORY_MAX_CHARS_PER_MESSAGE) {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const role = message.role === "user" || message.role === "assistant" ? message.role : null;
+  const content = truncateAnalysisMessageContent(message.content, maxChars);
+  if (!role || !content) {
+    return null;
+  }
+
   return {
-    schema_version: "1.0.0",
+    role,
+    content
+  };
+}
+
+function getConversationHistoryCharCount(history) {
+  return Array.isArray(history)
+    ? history.reduce((total, message) => total + (message && typeof message.content === "string" ? message.content.length : 0), 0)
+    : 0;
+}
+
+function buildFallbackConversationHistory(payload) {
+  const latestTurn = payload && payload.latest_turn && typeof payload.latest_turn === "object" ? payload.latest_turn : {};
+  return [
+    normalizeConversationMessage({
+      role: "user",
+      content: payload && typeof payload.prompt === "string" ? payload.prompt : latestTurn.prompt
+    }),
+    normalizeConversationMessage({
+      role: "assistant",
+      content: payload && typeof payload.response === "string" ? payload.response : latestTurn.response
+    })
+  ].filter(Boolean);
+}
+
+function buildAnalysisConversationBundle(payload) {
+  const fallbackHistory = buildFallbackConversationHistory(payload);
+  const rawConversationHistory = Array.isArray(payload && payload.conversationHistory)
+    ? payload.conversationHistory
+    : Array.isArray(payload && payload.conversation_history)
+      ? payload.conversation_history
+      : Array.isArray(payload && payload.conversation)
+        ? payload.conversation
+        : fallbackHistory;
+
+  let normalizedHistory = rawConversationHistory.map((message) => normalizeConversationMessage(message)).filter(Boolean);
+  if (normalizedHistory.length < 2 || normalizedHistory.at(-2).role !== "user" || normalizedHistory.at(-1).role !== "assistant") {
+    normalizedHistory = fallbackHistory;
+  } else {
+    normalizedHistory = normalizedHistory.slice();
+    if (fallbackHistory[0]) {
+      normalizedHistory[normalizedHistory.length - 2] = fallbackHistory[0];
+    }
+    if (fallbackHistory[1]) {
+      normalizedHistory[normalizedHistory.length - 1] = fallbackHistory[1];
+    }
+  }
+
+  const providedContext =
+    payload && payload.conversationContext && typeof payload.conversationContext === "object"
+      ? payload.conversationContext
+      : payload && payload.conversation_context && typeof payload.conversation_context === "object"
+        ? payload.conversation_context
+        : {};
+  const providedTotalTurns = Number(providedContext.total_turns);
+  const totalTurns = Math.max(normalizedHistory.length, Number.isFinite(providedTotalTurns) ? providedTotalTurns : 0);
+
+  let boundedHistory = normalizedHistory.slice(-ANALYSIS_HISTORY_MAX_MESSAGES);
+  while (boundedHistory.length > 2 && getConversationHistoryCharCount(boundedHistory) > ANALYSIS_HISTORY_MAX_TOTAL_CHARS) {
+    boundedHistory.shift();
+  }
+
+  if (getConversationHistoryCharCount(boundedHistory) > ANALYSIS_HISTORY_MAX_TOTAL_CHARS) {
+    const perTurnBudget = Math.max(256, Math.floor(ANALYSIS_HISTORY_MAX_TOTAL_CHARS / Math.max(1, boundedHistory.length)));
+    boundedHistory = boundedHistory
+      .map((message) => normalizeConversationMessage(message, perTurnBudget))
+      .filter(Boolean);
+  }
+
+  return {
+    latestTurn: {
+      prompt: boundedHistory[boundedHistory.length - 2] ? boundedHistory[boundedHistory.length - 2].content : "",
+      response: boundedHistory[boundedHistory.length - 1] ? boundedHistory[boundedHistory.length - 1].content : ""
+    },
+    history: boundedHistory,
+    context: {
+      total_turns: totalTurns,
+      included_turns: boundedHistory.length,
+      omitted_earlier_turns: Math.max(0, totalTurns - boundedHistory.length),
+      current_user_window_turn_index: Math.max(0, boundedHistory.length - 2),
+      current_assistant_window_turn_index: Math.max(0, boundedHistory.length - 1),
+      max_turns: ANALYSIS_HISTORY_MAX_MESSAGES,
+      max_chars_per_turn: ANALYSIS_HISTORY_MAX_CHARS_PER_MESSAGE,
+      max_total_chars: ANALYSIS_HISTORY_MAX_TOTAL_CHARS
+    }
+  };
+}
+
+function buildAnalysisRequest(payload) {
+  const analysisConversation = buildAnalysisConversationBundle(payload);
+  return {
+    schema_version: ANALYSIS_REQUEST_SCHEMA_VERSION,
     source: "chrome_extension",
     page_url: payload.pageUrl,
     captured_at: payload.capturedAt,
     conversation_id: payload.conversationId,
+    conversation_context: analysisConversation.context,
+    conversation_history: analysisConversation.history,
     latest_turn: {
-      prompt: payload.prompt,
-      response: payload.response
+      prompt: analysisConversation.latestTurn.prompt,
+      response: analysisConversation.latestTurn.response
     },
-    conversation: [
-      {
-        role: "user",
-        content: payload.prompt
-      },
-      {
-        role: "assistant",
-        content: payload.response
-      }
-    ]
+    conversation: analysisConversation.history
   };
 }
 
@@ -807,13 +918,14 @@ async function testManagedActivationConnection(config) {
 }
 
 function buildAnalysisPromptParts(payload) {
+  const analysisConversation = buildAnalysisConversationBundle(payload);
   const conversationHash = payload && payload.conversationId ? payload.conversationId : "extension-latest-turn";
-  const conversation = [
-    { role: "user", content: payload && payload.prompt ? payload.prompt : "" },
-    { role: "assistant", content: payload && payload.response ? payload.response : "" }
-  ];
   const systemPrompt = TAGGING_PROMPT.systemPrompt;
-  const userPrompt = TAGGING_PROMPT.renderUserPrompt(conversationHash, conversation);
+  const userPrompt = TAGGING_PROMPT.renderUserPrompt(
+    conversationHash,
+    analysisConversation.history,
+    analysisConversation.context
+  );
 
   return {
     systemPrompt,
@@ -822,10 +934,11 @@ function buildAnalysisPromptParts(payload) {
 }
 
 function buildOpenAiMessages(payload) {
-  return TAGGING_PROMPT.buildLatestTurnMessages(
-    payload.prompt || "",
-    payload.response || "",
-    payload.conversationId || "extension-latest-turn"
+  const analysisConversation = buildAnalysisConversationBundle(payload);
+  return TAGGING_PROMPT.buildMessages(
+    payload.conversationId || "extension-latest-turn",
+    analysisConversation.history,
+    analysisConversation.context
   );
 }
 

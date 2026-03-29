@@ -5,6 +5,10 @@ const ANALYSIS_RESPONSE_TIMEOUT_MS = 30000;
 const ANALYSIS_ATTEMPT_TIMEOUT_MS = 4000;
 const MAX_ANALYSIS_ATTEMPTS = 8;
 const STALE_ANALYSIS_RETRY_MS = 5000;
+const ANALYSIS_REQUEST_SCHEMA_VERSION = "1.1.0";
+const ANALYSIS_HISTORY_MAX_MESSAGES = 12;
+const ANALYSIS_HISTORY_MAX_CHARS_PER_MESSAGE = 4000;
+const ANALYSIS_HISTORY_MAX_TOTAL_CHARS = 12000;
 const FEEDBACK_COMMENT_MAX_CHARS = 280;
 const FEEDBACK_SCHEMA_VERSION = "1.0.0";
 const FEEDBACK_DISCLOSURE_VERSION = "2026-03-28";
@@ -529,6 +533,101 @@ function buildFingerprint(payload) {
   return [payload.conversationId || "", payload.prompt, payload.response].join("::");
 }
 
+function truncateAnalysisText(value, maxChars) {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!text) {
+    return "";
+  }
+
+  if (typeof maxChars !== "number" || !Number.isFinite(maxChars) || maxChars < 8 || text.length <= maxChars) {
+    return text;
+  }
+
+  return `${text.slice(0, Math.max(0, maxChars - 4)).trimEnd()} ...`;
+}
+
+function normalizeAnalysisMessage(message, maxChars = ANALYSIS_HISTORY_MAX_CHARS_PER_MESSAGE) {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const role = message.role === "user" || message.role === "assistant" ? message.role : null;
+  const content = truncateAnalysisText(message.content, maxChars);
+  if (!role || !content) {
+    return null;
+  }
+
+  return {
+    role,
+    content
+  };
+}
+
+function getConversationHistoryCharCount(history) {
+  return Array.isArray(history)
+    ? history.reduce((total, message) => total + (message && typeof message.content === "string" ? message.content.length : 0), 0)
+    : 0;
+}
+
+function buildDefaultAnalysisConversation(prompt, response) {
+  return [
+    normalizeAnalysisMessage({ role: "user", content: prompt }),
+    normalizeAnalysisMessage({ role: "assistant", content: response })
+  ].filter(Boolean);
+}
+
+function buildBoundedAnalysisConversation(transcript, prompt, response) {
+  const defaultConversation = buildDefaultAnalysisConversation(prompt, response);
+  let normalizedTranscript = Array.isArray(transcript)
+    ? transcript
+        .map((message) => normalizeAnalysisMessage(message))
+        .filter(Boolean)
+    : [];
+
+  if (
+    normalizedTranscript.length < 2 ||
+    normalizedTranscript.at(-2).role !== "user" ||
+    normalizedTranscript.at(-1).role !== "assistant"
+  ) {
+    normalizedTranscript = defaultConversation;
+  } else {
+    normalizedTranscript = normalizedTranscript.slice();
+    normalizedTranscript[normalizedTranscript.length - 2] = defaultConversation[0] || normalizedTranscript.at(-2);
+    normalizedTranscript[normalizedTranscript.length - 1] = defaultConversation[1] || normalizedTranscript.at(-1);
+  }
+
+  const totalTurns = normalizedTranscript.length;
+  let boundedConversation = normalizedTranscript.slice(-ANALYSIS_HISTORY_MAX_MESSAGES);
+
+  while (
+    boundedConversation.length > 2 &&
+    getConversationHistoryCharCount(boundedConversation) > ANALYSIS_HISTORY_MAX_TOTAL_CHARS
+  ) {
+    boundedConversation.shift();
+  }
+
+  if (getConversationHistoryCharCount(boundedConversation) > ANALYSIS_HISTORY_MAX_TOTAL_CHARS) {
+    const perTurnBudget = Math.max(256, Math.floor(ANALYSIS_HISTORY_MAX_TOTAL_CHARS / Math.max(1, boundedConversation.length)));
+    boundedConversation = boundedConversation
+      .map((message) => normalizeAnalysisMessage(message, perTurnBudget))
+      .filter(Boolean);
+  }
+
+  return {
+    conversationHistory: boundedConversation,
+    conversationContext: {
+      total_turns: totalTurns,
+      included_turns: boundedConversation.length,
+      omitted_earlier_turns: Math.max(0, totalTurns - boundedConversation.length),
+      current_user_window_turn_index: Math.max(0, boundedConversation.length - 2),
+      current_assistant_window_turn_index: Math.max(0, boundedConversation.length - 1),
+      max_turns: ANALYSIS_HISTORY_MAX_MESSAGES,
+      max_chars_per_turn: ANALYSIS_HISTORY_MAX_CHARS_PER_MESSAGE,
+      max_total_chars: ANALYSIS_HISTORY_MAX_TOTAL_CHARS
+    }
+  };
+}
+
 function readLatestConversationTurn() {
   const latestPair = getLatestPromptResponsePair();
   if (!latestPair) {
@@ -546,6 +645,9 @@ function readLatestConversationTurn() {
     return null;
   }
 
+  const transcript = readConversationTranscript();
+  const { conversationHistory, conversationContext } = buildBoundedAnalysisConversation(transcript, prompt, response);
+
   return {
     pageUrl: window.location.href,
     prompt,
@@ -554,6 +656,8 @@ function readLatestConversationTurn() {
     responseMountNode: responseMountNode || responseNode,
     capturedAt: new Date().toISOString(),
     conversationId: getConversationId(),
+    conversationHistory,
+    conversationContext,
     responseNode
   };
 }
@@ -564,7 +668,12 @@ function buildSerializablePayload(payload) {
     prompt: payload.prompt,
     response: payload.response,
     capturedAt: payload.capturedAt,
-    conversationId: payload.conversationId
+    conversationId: payload.conversationId,
+    schemaVersion: ANALYSIS_REQUEST_SCHEMA_VERSION,
+    conversationHistory: Array.isArray(payload.conversationHistory) ? payload.conversationHistory : [],
+    conversationContext: payload && payload.conversationContext && typeof payload.conversationContext === "object"
+      ? payload.conversationContext
+      : null
   };
 }
 
