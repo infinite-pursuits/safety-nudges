@@ -1,6 +1,7 @@
 const DEFAULT_CONFIG = {
   provider: "complementary",
   enabled: true,
+  analysisSensitivity: "standard",
   setupMode: "advanced",
   onboardingComplete: false,
   managedEmail: "",
@@ -67,6 +68,9 @@ const closeAdvancedSettingsButton = document.getElementById("close-advanced-sett
 const advancedTestConnectionButton = document.getElementById("advanced-test-connection");
 const openrouterKeyNode = document.getElementById("openrouter-key");
 const openrouterModelNode = document.getElementById("openrouter-model");
+const analysisSensitivityNode = document.getElementById("analysis-sensitivity");
+const analysisSensitivityValueNode = document.getElementById("analysis-sensitivity-value");
+const analysisSensitivityDescriptionNode = document.getElementById("analysis-sensitivity-description");
 const activityLogNode = document.getElementById("activity-log");
 const advancedConnectionStatusNode = document.getElementById("advanced-connection-status");
 const advancedAnalysisDisclosureNode = document.getElementById("advanced-analysis-disclosure");
@@ -97,6 +101,39 @@ const state = {
   }
 };
 
+const ANALYSIS_SENSITIVITY_OPTIONS = [
+  {
+    value: "permissive_strong",
+    label: "Flag less",
+    description: "Flags fewer borderline issues and favors clearer evidence.",
+    disclosure: "lower"
+  },
+  {
+    value: "permissive_soft",
+    label: "Slightly lower",
+    description: "Flags a bit less often and skips some borderline cases.",
+    disclosure: "slightly lower"
+  },
+  {
+    value: "standard",
+    label: "Standard",
+    description: "Default setting. Flags a balanced range of issues.",
+    disclosure: "standard"
+  },
+  {
+    value: "conservative_soft",
+    label: "Slightly higher",
+    description: "Flags a bit more often, including some borderline cases.",
+    disclosure: "slightly higher"
+  },
+  {
+    value: "conservative_strong",
+    label: "Flag more",
+    description: "Flags more possible issues and errs toward caution.",
+    disclosure: "higher"
+  }
+];
+
 function normalizeLoadedConfig(config) {
   const merged = {
     ...DEFAULT_CONFIG,
@@ -115,7 +152,24 @@ function normalizeLoadedConfig(config) {
     }
   }
 
+  merged.analysisSensitivity = normalizeAnalysisSensitivityValue(merged.analysisSensitivity);
+
   return merged;
+}
+
+function normalizeAnalysisSensitivityValue(value) {
+  const matchedOption = ANALYSIS_SENSITIVITY_OPTIONS.find((option) => option.value === value);
+  return matchedOption ? matchedOption.value : DEFAULT_CONFIG.analysisSensitivity;
+}
+
+function getAnalysisSensitivityIndex(value) {
+  const normalizedValue = normalizeAnalysisSensitivityValue(value);
+  const matchedIndex = ANALYSIS_SENSITIVITY_OPTIONS.findIndex((option) => option.value === normalizedValue);
+  return matchedIndex >= 0 ? matchedIndex : 2;
+}
+
+function getAnalysisSensitivityOption(value) {
+  return ANALYSIS_SENSITIVITY_OPTIONS[getAnalysisSensitivityIndex(value)];
 }
 
 function getOpenRouterModelPolicy(config) {
@@ -235,6 +289,9 @@ function buildConfigPatch() {
   return {
     provider: selectedProviderNode ? selectedProviderNode.value : state.config.provider,
     enabled: state.config.enabled,
+    analysisSensitivity: analysisSensitivityNode
+      ? (ANALYSIS_SENSITIVITY_OPTIONS[Number(analysisSensitivityNode.value)] || ANALYSIS_SENSITIVITY_OPTIONS[2]).value
+      : state.config.analysisSensitivity,
     setupMode: state.config.setupMode,
     onboardingComplete: state.config.onboardingComplete,
     managedEmail: managedEmailNode ? managedEmailNode.value.trim().toLowerCase() : state.config.managedEmail,
@@ -296,6 +353,12 @@ function syncFieldIntoState(node) {
     return;
   }
 
+  if (node === analysisSensitivityNode) {
+    const option = ANALYSIS_SENSITIVITY_OPTIONS[Number(analysisSensitivityNode.value)] || ANALYSIS_SENSITIVITY_OPTIONS[2];
+    state.config.analysisSensitivity = option.value;
+    return;
+  }
+
   if (providerRadioNodes.includes(node) && node.checked) {
     state.config.provider = node.value;
   }
@@ -325,6 +388,9 @@ function applyStateToInputs() {
   refreshOpenRouterModelOptions(state.config.openrouterModel || DEFAULT_CONFIG.openrouterModel);
   if (openrouterModelNode) {
     openrouterModelNode.value = state.config.openrouterModel || DEFAULT_CONFIG.openrouterModel;
+  }
+  if (analysisSensitivityNode) {
+    analysisSensitivityNode.value = String(getAnalysisSensitivityIndex(state.config.analysisSensitivity));
   }
 }
 
@@ -389,6 +455,13 @@ function render() {
   if (dataUseDescriptionNode) {
     dataUseDescriptionNode.textContent = buildDataUseDescription(state.config);
   }
+  const sensitivityOption = getAnalysisSensitivityOption(state.config.analysisSensitivity);
+  if (analysisSensitivityValueNode) {
+    analysisSensitivityValueNode.textContent = sensitivityOption.label;
+  }
+  if (analysisSensitivityDescriptionNode) {
+    analysisSensitivityDescriptionNode.textContent = `${sensitivityOption.description} Moving right tends to flag more possible issues; moving left tends to flag fewer.`;
+  }
 
   if (testConnectionButton) {
     testConnectionButton.disabled = !onboardingComplete || state.isTestingConnection;
@@ -403,18 +476,19 @@ function render() {
 function buildAnalysisDisclosure(config) {
   const setupMode = config && config.setupMode === "basic" ? "basic" : "advanced";
   const provider = config && config.provider === "openrouter" ? "openrouter" : "complementary";
+  const sensitivityLabel = getAnalysisSensitivityOption(config && config.analysisSensitivity).disclosure;
   if (setupMode === "basic") {
     if (provider === "openrouter") {
-      return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis using your selected model.";
+      return `When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis using your selected model and ${sensitivityLabel} sensitivity.`;
     }
-    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis using complementary defaults by site.";
+    return `When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis using complementary defaults by site and ${sensitivityLabel} sensitivity.`;
   }
 
   if (provider === "openrouter") {
-    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenRouter for analysis using your selected model.";
+    return `When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenRouter for analysis using your selected model and ${sensitivityLabel} sensitivity.`;
   }
 
-  return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenRouter for analysis using complementary defaults by site.";
+  return `When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenRouter for analysis using complementary defaults by site and ${sensitivityLabel} sensitivity.`;
 }
 
 function buildDataUseDescription(config) {
@@ -836,6 +910,8 @@ providerRadioNodes.forEach((node) => {
 
 attachFieldAutoSave(openrouterKeyNode);
 attachFieldAutoSave(openrouterModelNode, "change");
+attachFieldAutoSave(analysisSensitivityNode, "input");
+attachFieldAutoSave(analysisSensitivityNode, "change");
 attachFieldAutoSave(managedEmailNode);
 attachFieldAutoSave(managedEmailAdvancedNode);
 attachFieldAutoSave(managedKeyNode);

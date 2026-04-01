@@ -145,13 +145,20 @@
       }
 
       .field input,
-      .field select {
+      .field select,
+      .field input[type="range"] {
         box-sizing: border-box;
         width: 100%;
         border: 1px solid #c8cfda;
         border-radius: 10px;
         padding: 10px 12px;
         background: #fff;
+      }
+
+      .field input[type="range"] {
+        padding: 0;
+        border: 0;
+        background: transparent;
       }
 
       .provider-group {
@@ -262,6 +269,31 @@
         line-height: 1.4;
         white-space: pre-wrap;
       }
+
+      .slider-field {
+        gap: 8px;
+      }
+
+      .slider-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .slider-value {
+        font-size: 12px;
+        font-weight: 700;
+        color: #7c2d12;
+      }
+
+      .slider-scale {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 11px;
+        color: #6b7280;
+      }
     </style>
   </head>
   <body>
@@ -324,6 +356,18 @@
                   </div>
                 </span>
               </label>
+            </div>
+            <div class="field slider-field">
+              <div class="slider-header">
+                <label for="analysis-sensitivity">Analysis sensitivity</label>
+                <span id="analysis-sensitivity-value" class="slider-value">Standard</span>
+              </div>
+              <input id="analysis-sensitivity" type="range" min="0" max="4" step="1" value="2">
+              <div class="slider-scale" aria-hidden="true">
+                <span>Flag fewer</span>
+                <span>Flag more</span>
+              </div>
+              <p id="analysis-sensitivity-description" class="tiny">Standard is the default. Moving right tends to flag more possible issues; moving left tends to flag fewer.</p>
             </div>
           </div>
 

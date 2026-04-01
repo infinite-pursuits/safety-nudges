@@ -10,6 +10,7 @@ const DEFAULT_ANALYSIS_RESULT = {
 const DEFAULT_API_CONFIG = {
   provider: "complementary",
   enabled: true,
+  analysisSensitivity: "standard",
   identifySpans: true,
   setupMode: "advanced",
   onboardingComplete: false,
@@ -530,6 +531,7 @@ function getPersistedApiConfig(config) {
   return {
     provider: config.provider,
     enabled: config.enabled,
+    analysisSensitivity: config.analysisSensitivity,
     identifySpans: config.identifySpans,
     setupMode: config.setupMode,
     onboardingComplete: config.onboardingComplete,
@@ -552,6 +554,9 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
   return {
     provider: normalizeProviderSelection(config.provider || existing.provider),
     enabled: Boolean(config.enabled),
+    analysisSensitivity: TAGGING_PROMPT.normalizeAnalysisSensitivity(
+      config.analysisSensitivity || existing.analysisSensitivity
+    ),
     identifySpans: config.identifySpans !== false,
     setupMode: normalizeSetupMode(config.setupMode || existing.setupMode),
     onboardingComplete:
@@ -778,6 +783,8 @@ function buildAnalysisRequest(payload) {
     page_url: payload.pageUrl,
     captured_at: payload.capturedAt,
     conversation_id: payload.conversationId,
+    analysis_policy:
+      payload && payload.analysisPolicy && typeof payload.analysisPolicy === "object" ? payload.analysisPolicy : {},
     conversation_context: analysisConversation.context,
     conversation_history: analysisConversation.history,
     latest_turn: {
@@ -947,10 +954,9 @@ function buildAnalysisPromptParts(payload) {
   const analysisConversation = buildAnalysisConversationBundle(payload);
   const conversationHash = payload && payload.conversationId ? payload.conversationId : "extension-latest-turn";
   const systemPrompt = TAGGING_PROMPT.systemPrompt;
-  const userPrompt = TAGGING_PROMPT.renderUserPrompt(
-    conversationHash,
-    analysisConversation.history,
-    analysisConversation.context
+  const userPrompt = TAGGING_PROMPT.appendAnalysisSensitivityInstruction(
+    TAGGING_PROMPT.renderUserPrompt(conversationHash, analysisConversation.history, analysisConversation.context),
+    payload && payload.analysisPolicy ? payload.analysisPolicy.sensitivity : null
   );
 
   return {
@@ -964,7 +970,10 @@ function buildOpenAiMessages(payload) {
   return TAGGING_PROMPT.buildMessages(
     payload.conversationId || "extension-latest-turn",
     analysisConversation.history,
-    analysisConversation.context
+    analysisConversation.context,
+    {
+      analysisSensitivity: payload && payload.analysisPolicy ? payload.analysisPolicy.sensitivity : null
+    }
   );
 }
 
@@ -1815,21 +1824,28 @@ async function analyzeLatestTurn(payload, trace = null) {
 
   let result;
   try {
+    const analysisPayload = {
+      ...payload,
+      analysisPolicy: {
+        sensitivity: config.analysisSensitivity
+      }
+    };
     if (setupMode === "basic") {
       if (provider !== "openrouter") {
         throw new Error("Managed activation-code mode currently supports OpenRouter only.");
       }
       const requestBody = {
-        model: resolveOpenRouterModel(config, payload),
-        messages: buildOpenRouterMessages(payload),
-        max_tokens: resolveOpenRouterModel(config, payload) === "openai/gpt-5-mini" ? 1200 : 700,
+        model: resolveOpenRouterModel(config, analysisPayload),
+        messages: buildOpenRouterMessages(analysisPayload),
+        max_tokens: resolveOpenRouterModel(config, analysisPayload) === "openai/gpt-5-mini" ? 1200 : 700,
         response_format: {
           type: "json_object"
         },
         reasoning: {
           effort: "minimal"
         },
-        surface_host: getHostnameFromPageUrl(payload && payload.pageUrl ? payload.pageUrl : "")
+        surface_host: getHostnameFromPageUrl(payload && payload.pageUrl ? payload.pageUrl : ""),
+        analysis_policy: analysisPayload.analysisPolicy
       };
       logEvent("info", "Sending managed OpenRouter analysis relay request", {
         requestId: trace ? trace.requestId : null,
@@ -1854,9 +1870,9 @@ async function analyzeLatestTurn(payload, trace = null) {
       } catch (error) {
         throw new Error(`Managed OpenRouter returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
       }
-      result = normalizeAnalysisResponse(parsed, payload);
+      result = normalizeAnalysisResponse(parsed, analysisPayload);
     } else {
-      result = await getProviderAdapter(provider).analyze(payload, config, trace);
+      result = await getProviderAdapter(provider).analyze(analysisPayload, config, trace);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown analysis error";
