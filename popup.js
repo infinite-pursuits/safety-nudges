@@ -104,13 +104,13 @@ const state = {
 const ANALYSIS_SENSITIVITY_OPTIONS = [
   {
     value: "permissive_strong",
-    label: "Flag less",
+    label: "Very low",
     description: "Flags fewer borderline issues and favors clearer evidence.",
     disclosure: "lower"
   },
   {
     value: "permissive_soft",
-    label: "Slightly lower",
+    label: "Low",
     description: "Flags a bit less often and skips some borderline cases.",
     disclosure: "slightly lower"
   },
@@ -122,13 +122,13 @@ const ANALYSIS_SENSITIVITY_OPTIONS = [
   },
   {
     value: "conservative_soft",
-    label: "Slightly higher",
+    label: "High",
     description: "Flags a bit more often, including some borderline cases.",
     disclosure: "slightly higher"
   },
   {
     value: "conservative_strong",
-    label: "Flag more",
+    label: "Very high",
     description: "Flags more possible issues and errs toward caution.",
     disclosure: "higher"
   }
@@ -460,7 +460,9 @@ function render() {
     analysisSensitivityValueNode.textContent = sensitivityOption.label;
   }
   if (analysisSensitivityDescriptionNode) {
-    analysisSensitivityDescriptionNode.textContent = `${sensitivityOption.description} Moving right tends to flag more possible issues; moving left tends to flag fewer.`;
+    analysisSensitivityDescriptionNode.textContent = sensitivityOption.value === "standard"
+      ? "Standard is the default."
+      : sensitivityOption.description;
   }
 
   if (testConnectionButton) {
