@@ -20,7 +20,8 @@
       }
 
       button,
-      input {
+      input,
+      select {
         font: inherit;
       }
 
@@ -143,7 +144,8 @@
         font-weight: 700;
       }
 
-      .field input {
+      .field input,
+      .field select {
         box-sizing: border-box;
         width: 100%;
         border: 1px solid #c8cfda;
@@ -175,6 +177,23 @@
       .provider-option strong {
         display: block;
         font-size: 13px;
+      }
+
+      .provider-option-body {
+        display: grid;
+        gap: 6px;
+      }
+
+      .provider-option .inline-select {
+        width: 100%;
+        margin-top: 2px;
+      }
+
+      .provider-option .inline-select select {
+        font-family: inherit;
+        font-size: 13px;
+        line-height: 1.35;
+        color: #1f2937;
       }
 
       .status-line {
@@ -255,7 +274,7 @@
       <div id="onboarding-screen" class="screen" hidden>
         <div class="card">
           <h2>Choose setup</h2>
-          <p class="muted">Use a Safety Nudges activation code we provide, or enter your own API keys.</p>
+          <p class="muted">Use a Safety Nudges activation code we provide, or use your own OpenRouter key.</p>
           <button id="choose-basic-setup" class="choice-button" type="button">Use activation code</button>
           <button id="choose-advanced-setup" class="choice-button secondary" type="button">Advanced setup</button>
         </div>
@@ -286,25 +305,23 @@
       <div id="main-screen" class="screen" hidden>
         <div class="card stack">
           <div class="stack">
-            <h2>Select provider</h2>
+            <h2>Analysis route</h2>
             <div id="provider-group" class="provider-group">
-              <label class="provider-option" for="provider-openai">
-                <input id="provider-openai" type="radio" name="provider-selection" value="openai">
-                <span>
-                  <strong>OpenAI</strong>
-                </span>
-              </label>
-              <label class="provider-option" for="provider-anthropic">
-                <input id="provider-anthropic" type="radio" name="provider-selection" value="anthropic">
-                <span>
-                  <strong>Anthropic</strong>
-                </span>
-              </label>
               <label class="provider-option" for="provider-complementary">
                 <input id="provider-complementary" type="radio" name="provider-selection" value="complementary">
-                <span>
+                <span class="provider-option-body">
                   <strong>Complementary provider</strong>
                   <span class="tiny">Use OpenAI on claude.ai and Anthropic on chatgpt.com.</span>
+                </span>
+              </label>
+              <label class="provider-option" for="provider-openrouter">
+                <input id="provider-openrouter" type="radio" name="provider-selection" value="openrouter">
+                <span class="provider-option-body">
+                  <strong>Choose your model</strong>
+                  <span class="tiny">Use one OpenRouter model everywhere instead of the complementary defaults.</span>
+                  <div id="openrouter-model-field" class="inline-select">
+                    <select id="openrouter-model"></select>
+                  </div>
                 </span>
               </label>
             </div>
@@ -346,26 +363,10 @@
 
         <div class="card stack">
           <div class="field">
-            <label for="openai-key">OpenAI API key</label>
-            <input id="openai-key" type="password" placeholder="sk-...">
+            <label for="openrouter-key">OpenRouter API key</label>
+            <input id="openrouter-key" type="password" placeholder="sk-or-...">
           </div>
-          <div class="field">
-            <label for="openai-model">OpenAI model</label>
-            <input id="openai-model" type="text" placeholder="gpt-5-mini">
-          </div>
-          <p class="tiny">Manual OpenAI keys are kept only for the current browser session and must be re-entered after Chrome restarts.</p>
-        </div>
-
-        <div class="card stack">
-          <div class="field">
-            <label for="anthropic-key">Anthropic API key</label>
-            <input id="anthropic-key" type="password" placeholder="sk-ant-...">
-          </div>
-          <div class="field">
-            <label for="anthropic-model">Anthropic model</label>
-            <input id="anthropic-model" type="text" placeholder="claude-sonnet-4-6">
-          </div>
-          <p class="tiny">Manual Anthropic keys are kept only for the current browser session and must be re-entered after Chrome restarts.</p>
+          <p class="tiny">OpenRouter keys are kept only for the current browser session and must be re-entered after Chrome restarts.</p>
         </div>
 
         <div class="card stack">

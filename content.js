@@ -391,7 +391,16 @@ function getClaudeAssistantText(node) {
     return "";
   }
 
-  const blocks = Array.from(node.querySelectorAll(".font-claude-response-body"));
+  const clone = node.cloneNode(true);
+  if (!(clone instanceof HTMLElement)) {
+    return getGenericNodeText(node);
+  }
+
+  for (const thoughtNode of Array.from(clone.querySelectorAll(".assistant-thought, .group\\/status, [role=\"status\"]"))) {
+    thoughtNode.remove();
+  }
+
+  const blocks = Array.from(clone.querySelectorAll(".font-claude-response-body"));
   if (blocks.length > 0) {
     return blocks
       .map((block) => {
@@ -1841,8 +1850,6 @@ function chooseHighlightSpecs(result, turnIndex) {
       }
 
       candidates.push({
-        startChar: span.startChar,
-        endChar: span.endChar,
         text: span.text,
         comment: span.rationale || (issue && issue.rationale) || "",
         severity: issue && issue.severity === "high" ? "major" : "minor"
@@ -1856,10 +1863,7 @@ function chooseHighlightSpecs(result, turnIndex) {
     if (leftPriority !== rightPriority) {
       return leftPriority - rightPriority;
     }
-    if (left.startChar !== right.startChar) {
-      return left.startChar - right.startChar;
-    }
-    return right.endChar - left.endChar;
+    return right.text.length - left.text.length;
   });
 
   const selected = [];
@@ -1867,62 +1871,192 @@ function chooseHighlightSpecs(result, turnIndex) {
     if (!candidate.comment) {
       continue;
     }
-    const overlaps = selected.some(
-      (existing) => candidate.startChar < existing.endChar && candidate.endChar > existing.startChar
-    );
-    if (overlaps) {
-      continue;
-    }
     selected.push(candidate);
   }
 
-  return selected.sort((left, right) => {
-    if (left.startChar !== right.startChar) {
-      return right.startChar - left.startChar;
-    }
-    return right.endChar - left.endChar;
-  });
+  return selected;
 }
 
-function wrapHighlightRange(rootNode, spec) {
+function buildHighlightDebugSnippet(text, startIndex, endIndex, radius = 24) {
+  if (typeof text !== "string" || !text) {
+    return "";
+  }
+
+  const safeStart = Math.max(0, Math.min(text.length, startIndex));
+  const safeEnd = Math.max(safeStart, Math.min(text.length, endIndex));
+  const snippetStart = Math.max(0, safeStart - radius);
+  const snippetEnd = Math.min(text.length, safeEnd + radius);
+  return text.slice(snippetStart, snippetEnd);
+}
+
+const CANONICAL_HIGHLIGHT_CHAR_REPLACEMENTS = {
+  "\u2018": "'",
+  "\u2019": "'",
+  "\u201c": "\"",
+  "\u201d": "\"",
+  "\u2013": "-",
+  "\u2014": "-",
+  "\u00a0": " "
+};
+
+function canonicalizeHighlightText(value) {
+  if (typeof value !== "string") {
+    return { text: "", positions: [] };
+  }
+
+  const canonicalChars = [];
+  const positions = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const normalized = value[index].normalize("NFKC");
+    for (const normalizedChar of normalized) {
+      const mapped = CANONICAL_HIGHLIGHT_CHAR_REPLACEMENTS[normalizedChar] || normalizedChar;
+      if (/\s/.test(mapped)) {
+        continue;
+      }
+      canonicalChars.push(mapped.toLowerCase());
+      positions.push(index);
+    }
+  }
+
+  return {
+    text: canonicalChars.join(""),
+    positions
+  };
+}
+
+function computeWindowSimilarity(left, right) {
+  if (!left || !right) {
+    return 0;
+  }
+
+  const maxLength = Math.max(left.length, right.length);
+  if (maxLength === 0) {
+    return 0;
+  }
+
+  let matches = 0;
+  const compareLength = Math.min(left.length, right.length);
+  for (let index = 0; index < compareLength; index += 1) {
+    if (left[index] === right[index]) {
+      matches += 1;
+    }
+  }
+  return matches / maxLength;
+}
+
+function rangesOverlap(leftStart, leftEnd, rightStart, rightEnd) {
+  return leftStart < rightEnd && rightStart < leftEnd;
+}
+
+function findHighlightMatch(normalizedMap, spanText, occupiedRanges = []) {
+  if (!normalizedMap || !Array.isArray(normalizedMap.chars)) {
+    return null;
+  }
+
+  const trimmedText = typeof spanText === "string" ? spanText.replace(/\s+/g, " ").trim() : "";
+  if (!trimmedText) {
+    return null;
+  }
+
+  const fullText = normalizedMap.text || "";
+  const exactIndex = fullText.indexOf(trimmedText);
+  if (exactIndex >= 0) {
+    const exactEnd = exactIndex + trimmedText.length;
+    if (!occupiedRanges.some((range) => rangesOverlap(exactIndex, exactEnd, range.startIndex, range.endIndex))) {
+      return {
+        startIndex: exactIndex,
+        endIndex: exactEnd,
+        matchedText: fullText.slice(exactIndex, exactEnd),
+        matchType: "exact"
+      };
+    }
+  }
+
+  const canonicalContent = canonicalizeHighlightText(fullText);
+  const canonicalNeedle = canonicalizeHighlightText(trimmedText);
+  if (canonicalNeedle.text) {
+    const canonicalIndex = canonicalContent.text.indexOf(canonicalNeedle.text);
+    if (canonicalIndex >= 0) {
+      const rawStart = canonicalContent.positions[canonicalIndex];
+      const rawEnd = canonicalContent.positions[canonicalIndex + canonicalNeedle.text.length - 1] + 1;
+      if (!occupiedRanges.some((range) => rangesOverlap(rawStart, rawEnd, range.startIndex, range.endIndex))) {
+        return {
+          startIndex: rawStart,
+          endIndex: rawEnd,
+          matchedText: fullText.slice(rawStart, rawEnd),
+          matchType: "canonical"
+        };
+      }
+    }
+  }
+
+  if (!canonicalNeedle.text || !canonicalContent.text) {
+    return null;
+  }
+
+  let bestMatch = null;
+  const needleLength = canonicalNeedle.text.length;
+  const minLength = Math.max(1, needleLength - 8);
+  const maxLength = Math.min(canonicalContent.text.length, needleLength + 8);
+  for (let start = 0; start < canonicalContent.text.length; start += 1) {
+    for (let windowLength = minLength; windowLength <= maxLength && start + windowLength <= canonicalContent.text.length; windowLength += 1) {
+      const candidateText = canonicalContent.text.slice(start, start + windowLength);
+      const similarity = computeWindowSimilarity(candidateText, canonicalNeedle.text);
+      if (similarity < 0.82) {
+        continue;
+      }
+
+      const rawStart = canonicalContent.positions[start];
+      const rawEnd = canonicalContent.positions[start + windowLength - 1] + 1;
+      if (occupiedRanges.some((range) => rangesOverlap(rawStart, rawEnd, range.startIndex, range.endIndex))) {
+        continue;
+      }
+
+      if (!bestMatch || similarity > bestMatch.similarity) {
+        bestMatch = {
+          startIndex: rawStart,
+          endIndex: rawEnd,
+          matchedText: fullText.slice(rawStart, rawEnd),
+          matchType: "fuzzy",
+          similarity
+        };
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+function wrapResolvedHighlightRange(rootNode, spec, resolvedMatch) {
   const normalizedMap = buildNormalizedTextMap(rootNode);
   const chars = normalizedMap.chars;
   if (
-    !spec ||
-    typeof spec.startChar !== "number" ||
-    typeof spec.endChar !== "number" ||
-    spec.startChar < 0 ||
-    spec.endChar <= spec.startChar ||
-    spec.endChar > chars.length
+    !resolvedMatch ||
+    typeof resolvedMatch.startIndex !== "number" ||
+    typeof resolvedMatch.endIndex !== "number" ||
+    resolvedMatch.startIndex < 0 ||
+    resolvedMatch.endIndex <= resolvedMatch.startIndex ||
+    resolvedMatch.endIndex > chars.length
   ) {
     return {
       ok: false,
-      reason: "span-offsets-out-of-range"
+      reason: "span-text-not-found",
+      expectedSpan: spec
     };
   }
 
-  const expectedText = chars
-    .slice(spec.startChar, spec.endChar)
-    .map((entry) => entry.char)
-    .join("");
-  if (expectedText !== spec.text) {
-    return {
-      ok: false,
-      reason: "span-text-mismatch"
-    };
-  }
-
-  const startEntry = chars[spec.startChar];
-  const endEntry = chars[spec.endChar - 1];
+  const startEntry = chars[resolvedMatch.startIndex];
+  const endEntry = chars[resolvedMatch.endIndex - 1];
   if (!startEntry || !endEntry) {
     return {
       ok: false,
-      reason: "span-boundary-missing"
+      reason: "span-boundary-missing",
+      expectedSpan: spec
     };
   }
 
   try {
-    const coveredChars = chars.slice(spec.startChar, spec.endChar);
+    const coveredChars = chars.slice(resolvedMatch.startIndex, resolvedMatch.endIndex);
     const segments = [];
 
     for (const entry of coveredChars) {
@@ -1946,7 +2080,8 @@ function wrapHighlightRange(rootNode, spec) {
     if (segments.length === 0) {
       return {
         ok: false,
-        reason: "span-boundary-missing"
+        reason: "span-boundary-missing",
+        expectedSpan: spec
       };
     }
 
@@ -2006,14 +2141,15 @@ function wrapHighlightRange(rootNode, spec) {
   } catch (_error) {
     return {
       ok: false,
-      reason: "dom-range-insert-failed"
+      reason: "dom-range-insert-failed",
+      expectedSpan: spec
     };
   }
 }
 
 function renderInlineHighlights(payload, analysisState) {
   const promptNode = payload && payload.promptNode ? payload.promptNode : null;
-  const responseNode = payload && payload.responseNode ? payload.responseNode : null;
+  const responseNode = payload && payload.responseMountNode ? payload.responseMountNode : payload.responseNode;
 
   if (!analysisState || analysisState.status !== "complete") {
     clearInlineHighlights(promptNode);
@@ -2067,7 +2203,8 @@ function renderInlineHighlights(payload, analysisState) {
   const diagnostics = {
     expectedSpanCount: 0,
     renderedSpanCount: 0,
-    failureReasons: []
+    failureReasons: [],
+    failedSpans: []
   };
 
   for (const target of nodesByTurn) {
@@ -2077,13 +2214,57 @@ function renderInlineHighlights(payload, analysisState) {
 
     const specs = chooseHighlightSpecs(result, target.turnIndex);
     diagnostics.expectedSpanCount += specs.length;
+    const normalizedMap = buildNormalizedTextMap(target.node);
+    const occupiedRanges = [];
+    const plannedHighlights = [];
     for (const spec of specs) {
-      const renderResult = wrapHighlightRange(target.node, spec);
+      const resolvedMatch = findHighlightMatch(normalizedMap, spec.text, occupiedRanges);
+      if (!resolvedMatch) {
+        diagnostics.failureReasons.push("span-text-not-found");
+        diagnostics.failedSpans.push({
+          turnIndex: target.turnIndex,
+          reason: "span-text-not-found",
+          expectedText: typeof spec.text === "string" ? spec.text : "",
+          actualSnippet: normalizedMap.text.slice(0, 96),
+          comment: typeof spec.comment === "string" ? spec.comment : ""
+        });
+        continue;
+      }
+
+      occupiedRanges.push({
+        startIndex: resolvedMatch.startIndex,
+        endIndex: resolvedMatch.endIndex
+      });
+      plannedHighlights.push({
+        spec,
+        resolvedMatch
+      });
+    }
+
+    plannedHighlights.sort((left, right) => right.resolvedMatch.startIndex - left.resolvedMatch.startIndex);
+    for (const plan of plannedHighlights) {
+      const renderResult = wrapResolvedHighlightRange(target.node, plan.spec, plan.resolvedMatch);
       if (renderResult.ok) {
         diagnostics.renderedSpanCount += 1;
-      } else if (renderResult.reason) {
-        diagnostics.failureReasons.push(renderResult.reason);
+        continue;
       }
+
+      diagnostics.failureReasons.push(renderResult.reason || "dom-range-insert-failed");
+      diagnostics.failedSpans.push({
+        turnIndex: target.turnIndex,
+        reason: renderResult.reason || "dom-range-insert-failed",
+        expectedText: typeof plan.spec.text === "string" ? plan.spec.text : "",
+        matchedText: plan.resolvedMatch.matchedText || "",
+        matchType: plan.resolvedMatch.matchType || "",
+        similarity:
+          typeof plan.resolvedMatch.similarity === "number" ? Number(plan.resolvedMatch.similarity.toFixed(3)) : null,
+        actualSnippet: buildHighlightDebugSnippet(
+          normalizedMap.text,
+          plan.resolvedMatch.startIndex,
+          plan.resolvedMatch.endIndex
+        ),
+        comment: typeof plan.spec.comment === "string" ? plan.spec.comment : ""
+      });
     }
   }
 
@@ -2148,6 +2329,10 @@ function maybeLogSpanDisplayMessage(payload, result, highlightDiagnostics) {
     failureReasons:
       highlightDiagnostics && Array.isArray(highlightDiagnostics.failureReasons)
         ? Array.from(new Set(highlightDiagnostics.failureReasons))
+        : [],
+    failedSpans:
+      highlightDiagnostics && Array.isArray(highlightDiagnostics.failedSpans)
+        ? highlightDiagnostics.failedSpans.slice(0, 5)
         : []
   }, "warn");
 }

@@ -8,11 +8,14 @@ const DEFAULT_ANALYSIS_RESULT = {
 };
 
 const DEFAULT_API_CONFIG = {
-  provider: "openai",
+  provider: "complementary",
   enabled: true,
   identifySpans: true,
   setupMode: "advanced",
   onboardingComplete: false,
+  endpoint: "http://127.0.0.1:8787/analyze",
+  ollamaEndpoint: "http://127.0.0.1:11434/api/chat",
+  ollamaModel: "llama3.1:8b",
   managedEmail: "",
   managedAccessKey: "",
   managedSessionToken: "",
@@ -21,16 +24,16 @@ const DEFAULT_API_CONFIG = {
   managedRefreshExpiresAt: "",
   managedAllocationId: "",
   managedProviderProjectId: "",
-  openAiApiKey: "",
-  openAiModel: "gpt-5-mini",
-  anthropicApiKey: "",
-  anthropicModel: "claude-sonnet-4-6"
+  managedModelPolicy: null,
+  openrouterApiKey: "",
+  openrouterModel: ""
 };
 const SUPABASE_URL = "https://bjokhkmomdogymmmnpdo.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_KdngS39ZCxvJ854R0zy3xA_0LKy8nj5";
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_API_VERSION = "2023-06-01";
+const MANAGED_ACCESS_FUNCTION_NAME = "openrouter-alpha-user";
+const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_HTTP_REFERER = "https://github.com/jwedgwood/safety-nudges";
+const OPENROUTER_X_TITLE = "Safety Nudges";
 const DEFAULT_LOCAL_ANALYSIS_ENDPOINT = "http://127.0.0.1:8787/analyze";
 const DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/chat";
 const DEFAULT_OLLAMA_MODEL = "llama3.1:8b";
@@ -47,6 +50,25 @@ let analysisRequestSequence = 0;
 
 const PERSISTED_ANALYSIS_API_KEY = "analysisApi";
 const SESSION_ANALYSIS_SECRETS_KEY = "analysisApiSecrets";
+const STATIC_OPENROUTER_MODEL_POLICY = {
+  catalog_version: "2026-03-31",
+  latest_sonnet_model_id: "anthropic/claude-sonnet-4.6",
+  default_models_by_surface: {
+    "claude.ai": "openai/gpt-5-mini",
+    "chatgpt.com": "anthropic/claude-sonnet-4.6",
+    "chat.openai.com": "anthropic/claude-sonnet-4.6"
+  },
+  curated_models: [
+    { id: "openai/gpt-5-mini", label: "OpenAI: GPT-5 Mini" },
+    { id: "anthropic/claude-sonnet-4.6", label: "Anthropic: Claude Sonnet 4.6" },
+    { id: "google/gemini-2.5-flash", label: "Google: Gemini 2.5 Flash" },
+    { id: "google/gemini-2.5-pro", label: "Google: Gemini 2.5 Pro" },
+    { id: "meta-llama/llama-4-maverick", label: "Meta: Llama 4 Maverick" },
+    { id: "mistralai/mistral-medium-3.1", label: "Mistral: Medium 3.1" },
+    { id: "qwen/qwen3-coder", label: "Qwen: Qwen3 Coder" },
+    { id: "qwen/qwen3-235b-a22b", label: "Qwen: Qwen3 235B A22B" }
+  ]
+};
 
 const runtimeState = {
   activityLog: [],
@@ -159,7 +181,7 @@ async function fetchWithTimeout(resource, options = {}, timeoutMs = NETWORK_TIME
 }
 
 async function callSupabaseManagedAccess(action, payload = {}) {
-  const response = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/provision-alpha-user`, {
+  const response = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/${MANAGED_ACCESS_FUNCTION_NAME}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -206,7 +228,8 @@ function clearManagedSessionFields(config) {
     managedSessionExpiresAt: "",
     managedRefreshExpiresAt: "",
     managedAllocationId: "",
-    managedProviderProjectId: ""
+    managedProviderProjectId: "",
+    managedModelPolicy: null
   };
 }
 
@@ -214,16 +237,21 @@ function applyManagedSessionToConfig(config, response) {
   const managedSession = response && response.managed_session && typeof response.managed_session === "object"
     ? response.managed_session
     : {};
+  const providerSelection = normalizeProviderSelection(config && config.provider ? config.provider : response && response.provider);
 
   return {
     ...clearManagedSessionFields(config),
-    provider: response && response.provider ? response.provider : config.provider,
+    provider: providerSelection,
     setupMode: "basic",
     onboardingComplete: true,
-    openAiModel:
+    openrouterModel:
       response && response.default_model
         ? response.default_model
-        : config.openAiModel || DEFAULT_API_CONFIG.openAiModel,
+        : config.openrouterModel || DEFAULT_API_CONFIG.openrouterModel,
+    managedModelPolicy:
+      response && response.managed_model_policy && typeof response.managed_model_policy === "object"
+        ? response.managed_model_policy
+        : config.managedModelPolicy || STATIC_OPENROUTER_MODEL_POLICY,
     managedSessionToken:
       managedSession && typeof managedSession.session_token === "string" ? managedSession.session_token : "",
     managedRefreshToken:
@@ -476,15 +504,11 @@ function getStoredApiConfig() {
       merged.managedAccessKey = "";
       chrome.storage.session.get([SESSION_ANALYSIS_SECRETS_KEY], (sessionStored) => {
         const sessionSecrets = sessionStored[SESSION_ANALYSIS_SECRETS_KEY] || {};
-        merged.openAiApiKey =
-          typeof sessionSecrets.openAiApiKey === "string" ? sessionSecrets.openAiApiKey.trim() : "";
-        merged.anthropicApiKey =
-          typeof sessionSecrets.anthropicApiKey === "string" ? sessionSecrets.anthropicApiKey.trim() : "";
+        merged.openrouterApiKey =
+          typeof sessionSecrets.openrouterApiKey === "string" ? sessionSecrets.openrouterApiKey.trim() : "";
 
         if (!merged.onboardingComplete) {
-          const hasLegacySetup =
-            Boolean(merged.openAiApiKey) ||
-            Boolean(merged.anthropicApiKey);
+          const hasLegacySetup = Boolean(merged.openrouterApiKey);
           if (hasLegacySetup) {
             merged.onboardingComplete = true;
             merged.setupMode = merged.setupMode || "advanced";
@@ -498,8 +522,7 @@ function getStoredApiConfig() {
 
 function getSessionSecretConfig(config) {
   return {
-    openAiApiKey: typeof config.openAiApiKey === "string" ? config.openAiApiKey.trim() : "",
-    anthropicApiKey: typeof config.anthropicApiKey === "string" ? config.anthropicApiKey.trim() : ""
+    openrouterApiKey: typeof config.openrouterApiKey === "string" ? config.openrouterApiKey.trim() : ""
   };
 }
 
@@ -510,16 +533,18 @@ function getPersistedApiConfig(config) {
     identifySpans: config.identifySpans,
     setupMode: config.setupMode,
     onboardingComplete: config.onboardingComplete,
+    endpoint: config.endpoint,
+    ollamaEndpoint: config.ollamaEndpoint,
+    ollamaModel: config.ollamaModel,
     managedSessionToken: config.managedSessionToken,
     managedRefreshToken: config.managedRefreshToken,
     managedSessionExpiresAt: config.managedSessionExpiresAt,
     managedRefreshExpiresAt: config.managedRefreshExpiresAt,
     managedAllocationId: config.managedAllocationId,
     managedProviderProjectId: config.managedProviderProjectId,
-    openAiModel: config.openAiModel,
-    anthropicModel: config.anthropicModel,
-    openAiApiKey: "",
-    anthropicApiKey: ""
+    managedModelPolicy: config.managedModelPolicy,
+    openrouterModel: config.openrouterModel,
+    openrouterApiKey: ""
   };
 }
 
@@ -533,6 +558,18 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
       typeof config.onboardingComplete === "boolean"
         ? config.onboardingComplete
         : Boolean(existing.onboardingComplete),
+    endpoint:
+      typeof config.endpoint === "string" && config.endpoint.trim()
+        ? config.endpoint.trim()
+        : existing.endpoint || DEFAULT_API_CONFIG.endpoint,
+    ollamaEndpoint:
+      typeof config.ollamaEndpoint === "string" && config.ollamaEndpoint.trim()
+        ? config.ollamaEndpoint.trim()
+        : existing.ollamaEndpoint || DEFAULT_API_CONFIG.ollamaEndpoint,
+    ollamaModel:
+      typeof config.ollamaModel === "string" && config.ollamaModel.trim()
+        ? config.ollamaModel.trim()
+        : existing.ollamaModel || DEFAULT_API_CONFIG.ollamaModel,
     managedEmail:
       typeof config.managedEmail === "string"
         ? config.managedEmail.trim().toLowerCase()
@@ -565,16 +602,15 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
       typeof config.managedProviderProjectId === "string"
         ? config.managedProviderProjectId.trim()
         : existing.managedProviderProjectId || DEFAULT_API_CONFIG.managedProviderProjectId,
-    openAiApiKey:
-      typeof config.openAiApiKey === "string" && config.openAiApiKey.trim()
-        ? config.openAiApiKey.trim()
-        : existing.openAiApiKey || DEFAULT_API_CONFIG.openAiApiKey,
-    openAiModel: config.openAiModel || existing.openAiModel || DEFAULT_API_CONFIG.openAiModel,
-    anthropicApiKey:
-      typeof config.anthropicApiKey === "string" && config.anthropicApiKey.trim()
-        ? config.anthropicApiKey.trim()
-        : existing.anthropicApiKey || DEFAULT_API_CONFIG.anthropicApiKey,
-    anthropicModel: config.anthropicModel || existing.anthropicModel || DEFAULT_API_CONFIG.anthropicModel
+    managedModelPolicy:
+      config.managedModelPolicy && typeof config.managedModelPolicy === "object"
+        ? config.managedModelPolicy
+        : existing.managedModelPolicy || DEFAULT_API_CONFIG.managedModelPolicy,
+    openrouterApiKey:
+      typeof config.openrouterApiKey === "string" && config.openrouterApiKey.trim()
+        ? config.openrouterApiKey.trim()
+        : existing.openrouterApiKey || DEFAULT_API_CONFIG.openrouterApiKey,
+    openrouterModel: config.openrouterModel || existing.openrouterModel || DEFAULT_API_CONFIG.openrouterModel
   };
 }
 
@@ -609,10 +645,8 @@ function setStoredApiConfig(config) {
                 hasManagedSessionToken: Boolean(nextConfig.managedSessionToken),
                 hasManagedRefreshToken: Boolean(nextConfig.managedRefreshToken),
                 managedAllocationId: nextConfig.managedAllocationId || null,
-                openAiModel: nextConfig.openAiModel,
-                anthropicModel: nextConfig.anthropicModel,
-                hasOpenAiKey: Boolean(nextConfig.openAiApiKey),
-                hasAnthropicKey: Boolean(nextConfig.anthropicApiKey)
+                openrouterModel: nextConfig.openrouterModel,
+                hasOpenRouterKey: Boolean(nextConfig.openrouterApiKey)
               });
               resolve();
             }
@@ -755,14 +789,17 @@ function buildAnalysisRequest(payload) {
 }
 
 function normalizeProviderName(value) {
-  return value === "local" || value === "ollama" || value === "anthropic" ? value : "openai";
+  return value === "local" || value === "ollama" ? value : "openrouter";
 }
 
 function normalizeProviderSelection(value) {
-  if (value === "anthropic" || value === "local" || value === "ollama" || value === "complementary") {
+  if (value === "complementary") {
     return value;
   }
-  return "openai";
+  if (value === "local" || value === "ollama") {
+    return value;
+  }
+  return "openrouter";
 }
 
 function normalizeSetupMode(value) {
@@ -783,18 +820,7 @@ function getHostnameFromPageUrl(pageUrl) {
 
 function resolveProviderForPayload(config, payload = null) {
   const selection = normalizeProviderSelection(config && config.provider ? config.provider : DEFAULT_API_CONFIG.provider);
-  if (selection !== "complementary") {
-    return normalizeProviderName(selection);
-  }
-
-  const hostname = getHostnameFromPageUrl(payload && payload.pageUrl ? payload.pageUrl : "");
-  if (hostname === "claude.ai") {
-    return "openai";
-  }
-  if (hostname === "chatgpt.com" || hostname === "chat.openai.com") {
-    return "anthropic";
-  }
-  return "openai";
+  return normalizeProviderName(selection);
 }
 
 function buildFriendlyConnectionResult(ok, message, details = null, reasonCode = "generic") {
@@ -891,27 +917,27 @@ function classifyConnectionFailure(errorMessage) {
 }
 
 async function testManagedActivationConnection(config) {
-  const managedResult = await callManagedAccessWithSession("managed_openai_test", config, {}, {
+  const managedResult = await callManagedAccessWithSession("managed_openrouter_test", config, {}, {
     allowActivationExchange: true
   });
   const hydratedConfig = managedResult.config;
   const testResult = managedResult.response;
-  const rawText = extractOpenAiTextResponse(testResult.raw_response || {});
+  const rawText = extractOpenRouterTextResponse(testResult.raw_response || {});
   try {
     JSON.parse(rawText);
   } catch (error) {
-    throw new Error(`Managed OpenAI returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
+    throw new Error(`Managed OpenRouter returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
   }
 
   const result = buildFriendlyConnectionResult(
     true,
-    `Connection test succeeded. Managed ${hydratedConfig.provider === "openai" ? "OpenAI" : "provider"} access is ready.`,
+    "Connection test succeeded. Managed OpenRouter access is ready.",
     {
       provider: hydratedConfig.provider,
-      model: hydratedConfig.openAiModel,
+      model: hydratedConfig.openrouterModel,
       ...extractManagedSessionMetadata(hydratedConfig)
     },
-    "managed_openai_success"
+    "managed_openrouter_success"
   );
   logEvent("info", "Managed access session verified via Supabase Edge Function", result.details);
   return result;
@@ -942,58 +968,36 @@ function buildOpenAiMessages(payload) {
   );
 }
 
-function buildAnthropicMessages(payload) {
-  const { systemPrompt, userPrompt } = buildAnalysisPromptParts(payload);
-  return {
-    system: systemPrompt,
-    messages: [
-      {
-        role: "user",
-        content: userPrompt
-      }
-    ]
-  };
+function buildOpenRouterMessages(payload) {
+  return buildOpenAiMessages(payload);
 }
 
-function extractOpenAiTextResponse(response) {
-  if (response && typeof response.output_text === "string" && response.output_text.trim()) {
-    return response.output_text;
-  }
-
-  const output = Array.isArray(response && response.output) ? response.output : [];
-  for (const item of output) {
-    const content = Array.isArray(item && item.content) ? item.content : [];
-    for (const block of content) {
-      if ((block && block.type === "output_text") || (block && block.type === "text")) {
-        if (typeof block.text === "string" && block.text.trim()) {
-          return block.text;
+function extractOpenRouterTextResponse(response) {
+  const choices = Array.isArray(response && response.choices) ? response.choices : [];
+  for (const choice of choices) {
+    const message = choice && choice.message && typeof choice.message === "object" ? choice.message : null;
+    if (!message) {
+      continue;
+    }
+    if (typeof message.content === "string" && message.content.trim()) {
+      return message.content.trim();
+    }
+    if (Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (block && typeof block.text === "string" && block.text.trim()) {
+          return block.text.trim();
         }
       }
     }
   }
 
-  throw new Error("OpenAI response did not contain output text.");
+  throw new Error("OpenRouter response did not contain output text.");
 }
 
 function extractOllamaTextResponse(response) {
   const text = response && response.message && typeof response.message.content === "string" ? response.message.content : "";
   if (!text.trim()) {
     throw new Error("Ollama response did not contain message content.");
-  }
-
-  return text;
-}
-
-function extractAnthropicTextResponse(response) {
-  const content = Array.isArray(response && response.content) ? response.content : [];
-  const text = content
-    .filter((block) => block && block.type === "text" && typeof block.text === "string" && block.text.trim())
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
-
-  if (!text) {
-    throw new Error("Anthropic response did not contain text content.");
   }
 
   return text;
@@ -1220,45 +1224,6 @@ function normalizeIssue(rawIssue, index) {
   };
 }
 
-function normalizeSpanText(value) {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
-}
-
-const CANONICAL_SPAN_CHAR_REPLACEMENTS = {
-  "\u2018": "'",
-  "\u2019": "'",
-  "\u201c": "\"",
-  "\u201d": "\"",
-  "\u2013": "-",
-  "\u2014": "-",
-  "\u00a0": " "
-};
-
-function canonicalizeSpanText(value) {
-  if (typeof value !== "string") {
-    return { text: "", positions: [] };
-  }
-
-  const canonicalChars = [];
-  const rawPositions = [];
-  for (let rawIndex = 0; rawIndex < value.length; rawIndex += 1) {
-    const normalized = value[rawIndex].normalize("NFKC");
-    for (const normalizedChar of normalized) {
-      const mapped = CANONICAL_SPAN_CHAR_REPLACEMENTS[normalizedChar] || normalizedChar;
-      if (/\s/.test(mapped)) {
-        continue;
-      }
-      canonicalChars.push(mapped);
-      rawPositions.push(rawIndex);
-    }
-  }
-
-  return {
-    text: canonicalChars.join(""),
-    positions: rawPositions
-  };
-}
-
 function countEvidenceSpans(issues) {
   return Array.isArray(issues)
     ? issues.reduce(
@@ -1268,58 +1233,8 @@ function countEvidenceSpans(issues) {
     : 0;
 }
 
-function resolveSpanOffsets(content, text, startChar, endChar) {
-  if (typeof content !== "string" || !content || typeof text !== "string" || !text) {
-    return null;
-  }
-
-  const trimmedText = text.trim();
-  if (!trimmedText) {
-    return null;
-  }
-
-  if (
-    Number.isInteger(startChar) &&
-    Number.isInteger(endChar) &&
-    startChar >= 0 &&
-    endChar > startChar &&
-    endChar <= content.length &&
-    normalizeSpanText(content.slice(startChar, endChar)) === normalizeSpanText(trimmedText)
-  ) {
-    return {
-      startChar,
-      endChar,
-      text: content.slice(startChar, endChar)
-    };
-  }
-
-  const exactMatchIndex = content.indexOf(trimmedText);
-  if (exactMatchIndex >= 0) {
-    return {
-      startChar: exactMatchIndex,
-      endChar: exactMatchIndex + trimmedText.length,
-      text: content.slice(exactMatchIndex, exactMatchIndex + trimmedText.length)
-    };
-  }
-
-  const canonicalContent = canonicalizeSpanText(content);
-  const canonicalText = canonicalizeSpanText(trimmedText);
-  if (!canonicalText.text) {
-    return null;
-  }
-
-  const canonicalMatchIndex = canonicalContent.text.indexOf(canonicalText.text);
-  if (canonicalMatchIndex === -1) {
-    return null;
-  }
-
-  const rawStart = canonicalContent.positions[canonicalMatchIndex];
-  const rawEnd = canonicalContent.positions[canonicalMatchIndex + canonicalText.text.length - 1] + 1;
-  return {
-    startChar: rawStart,
-    endChar: rawEnd,
-    text: content.slice(rawStart, rawEnd)
-  };
+function normalizeEvidenceSpanText(value) {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
 }
 
 function summarizeRawIssueSpans(rawPayload) {
@@ -1349,10 +1264,6 @@ function normalizeEvidenceSpans(rawIssue, prompt, response) {
     : Array.isArray(rawIssue.evidenceSpans)
       ? rawIssue.evidenceSpans
       : [];
-  const turnText = {
-    0: typeof prompt === "string" ? prompt : "",
-    1: typeof response === "string" ? response : ""
-  };
   const normalized = [];
 
   for (const span of spans.slice(0, 3)) {
@@ -1361,43 +1272,26 @@ function normalizeEvidenceSpans(rawIssue, prompt, response) {
         ? span.turn_index
         : span && Number.isInteger(span.turnIndex)
           ? span.turnIndex
-          : null;
-    const startChar =
-      span && Number.isInteger(span.start_char)
-        ? span.start_char
-        : span && Number.isInteger(span.startChar)
-          ? span.startChar
-          : null;
-    const endChar =
-      span && Number.isInteger(span.end_char)
-        ? span.end_char
-        : span && Number.isInteger(span.endChar)
-          ? span.endChar
-          : null;
-    const text = span && typeof span.text === "string" ? span.text : "";
+          : expectedTurn;
+    const text = normalizeEvidenceSpanText(span && typeof span.text === "string" ? span.text : "");
     const rationale =
       span && typeof span.rationale === "string" && span.rationale
         ? span.rationale
         : rawIssue && typeof rawIssue.rationale === "string"
           ? rawIssue.rationale
           : "";
-    const content = turnIndex === 0 || turnIndex === 1 ? turnText[turnIndex] : "";
-    const resolvedOffsets = resolveSpanOffsets(content, text, startChar, endChar);
 
     if (
       expectedTurn === null ||
       turnIndex !== expectedTurn ||
-      !text ||
-      !resolvedOffsets
+      !text
     ) {
       continue;
     }
 
     normalized.push({
       turnIndex,
-      startChar: resolvedOffsets.startChar,
-      endChar: resolvedOffsets.endChar,
-      text: resolvedOffsets.text,
+      text,
       rationale
     });
   }
@@ -1504,20 +1398,37 @@ async function callLocalEndpointAnalysis(payload, config, trace = null) {
   return normalized;
 }
 
-async function callOpenAiAnalysis(payload, config, trace = null) {
-  if (!config.openAiApiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+function resolveOpenRouterModel(config, payload = null) {
+  const providerSelection = normalizeProviderSelection(config && config.provider ? config.provider : DEFAULT_API_CONFIG.provider);
+  if (
+    providerSelection === "openrouter" &&
+    config &&
+    typeof config.openrouterModel === "string" &&
+    config.openrouterModel.trim()
+  ) {
+    return config.openrouterModel.trim();
+  }
+
+  const hostname = getHostnameFromPageUrl(payload && payload.pageUrl ? payload.pageUrl : "");
+  const policy =
+    config && config.managedModelPolicy && typeof config.managedModelPolicy === "object"
+      ? config.managedModelPolicy
+      : STATIC_OPENROUTER_MODEL_POLICY;
+  const defaults = policy && typeof policy.default_models_by_surface === "object" ? policy.default_models_by_surface : {};
+  return defaults[hostname] || "openai/gpt-5-mini";
+}
+
+async function callOpenRouterAnalysis(payload, config, trace = null) {
+  if (!config.openrouterApiKey) {
+    throw new Error("OpenRouter API key is missing. Add it in the extension popup.");
   }
 
   const requestBody = {
-    model: config.openAiModel || DEFAULT_API_CONFIG.openAiModel,
-    input: buildOpenAiMessages(payload),
-    max_output_tokens: 700,
-    text: {
-      format: {
-        type: "json_object"
-      },
-      verbosity: "low"
+    model: resolveOpenRouterModel(config, payload),
+    messages: buildOpenRouterMessages(payload),
+    max_tokens: resolveOpenRouterModel(config, payload) === "openai/gpt-5-mini" ? 1200 : 700,
+    response_format: {
+      type: "json_object"
     },
     reasoning: {
       effort: "minimal"
@@ -1525,29 +1436,31 @@ async function callOpenAiAnalysis(payload, config, trace = null) {
   };
 
   const startedAtMs = nowMs();
-  logEvent("info", "Sending OpenAI analysis request", {
+  logEvent("info", "Sending OpenRouter analysis request", {
     requestId: trace ? trace.requestId : null,
     model: requestBody.model,
     conversationId: payload.conversationId || null
   });
 
-  const response = await fetchWithTimeout(OPENAI_RESPONSES_URL, {
+  const response = await fetchWithTimeout(OPENROUTER_CHAT_COMPLETIONS_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${config.openAiApiKey}`
+      Authorization: `Bearer ${config.openrouterApiKey}`,
+      "HTTP-Referer": OPENROUTER_HTTP_REFERER,
+      "X-Title": OPENROUTER_X_TITLE
     },
     body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenAI API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+    throw new Error(`OpenRouter API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
   }
 
   const rawResponse = await response.json();
-  const rawText = extractOpenAiTextResponse(rawResponse);
-  logEvent("info", "Received OpenAI analysis response", {
+  const rawText = extractOpenRouterTextResponse(rawResponse);
+  logEvent("info", "Received OpenRouter analysis response", {
     requestId: trace ? trace.requestId : null,
     model: requestBody.model,
     httpStatus: response.status,
@@ -1559,10 +1472,10 @@ async function callOpenAiAnalysis(payload, config, trace = null) {
   try {
     parsed = JSON.parse(rawText);
   } catch (error) {
-    throw new Error(`OpenAI returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
+    throw new Error(`OpenRouter returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
   }
 
-  logEvent("info", "OpenAI analysis raw payload", {
+  logEvent("info", "OpenRouter analysis raw payload", {
     requestId: trace ? trace.requestId : null,
     model: requestBody.model,
     rawPayloadJson: safeJsonStringify(parsed),
@@ -1571,7 +1484,7 @@ async function callOpenAiAnalysis(payload, config, trace = null) {
 
   const normalized = normalizeAnalysisResponse(parsed, payload);
   if (config.identifySpans !== false && normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
-    logEvent("warn", "OpenAI analysis returned issues without evidence spans", {
+    logEvent("warn", "OpenRouter analysis returned issues without evidence spans", {
       requestId: trace ? trace.requestId : null,
       model: requestBody.model,
       source: normalized.source,
@@ -1582,79 +1495,67 @@ async function callOpenAiAnalysis(payload, config, trace = null) {
   return normalized;
 }
 
-async function callAnthropicAnalysis(payload, config, trace = null) {
-  if (!config.anthropicApiKey) {
-    throw new Error("Anthropic API key is missing. Add it in the extension popup.");
+async function testOpenRouterConnection(config) {
+  if (!config.openrouterApiKey) {
+    throw new Error("OpenRouter API key is missing. Add it in the extension popup.");
   }
 
-  const promptParts = buildAnthropicMessages(payload);
+  const model = resolveOpenRouterModel(config, createTestPayload());
   const requestBody = {
-    model: config.anthropicModel || DEFAULT_API_CONFIG.anthropicModel,
-    system: promptParts.system,
-    messages: promptParts.messages,
-    max_tokens: 700
+    model,
+    messages: [
+      { role: "system", content: "Reply with JSON only." },
+      { role: "user", content: 'Return exactly {"ok":true}' }
+    ],
+    max_tokens: model === "openai/gpt-5-mini" ? 200 : 120,
+    response_format: {
+      type: "json_object"
+    },
+    reasoning: {
+      effort: "minimal"
+    }
   };
 
   const startedAtMs = nowMs();
-  logEvent("info", "Sending Anthropic analysis request", {
-    requestId: trace ? trace.requestId : null,
-    model: requestBody.model,
-    conversationId: payload.conversationId || null
+  logEvent("info", "Sending OpenRouter connection test", {
+    model: requestBody.model
   });
 
-  const response = await fetchWithTimeout(ANTHROPIC_MESSAGES_URL, {
+  const response = await fetchWithTimeout(OPENROUTER_CHAT_COMPLETIONS_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": config.anthropicApiKey,
-      "anthropic-version": ANTHROPIC_API_VERSION
+      Authorization: `Bearer ${config.openrouterApiKey}`,
+      "HTTP-Referer": OPENROUTER_HTTP_REFERER,
+      "X-Title": OPENROUTER_X_TITLE
     },
     body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Anthropic API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+    throw new Error(`OpenRouter API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
   }
 
   const rawResponse = await response.json();
-  const rawText = extractAnthropicTextResponse(rawResponse);
-  logEvent("info", "Received Anthropic analysis response", {
-    requestId: trace ? trace.requestId : null,
-    model: requestBody.model,
-    httpStatus: response.status,
-    latencyMs: elapsedMs(startedAtMs),
-    responseChars: rawText.length
-  });
-
-  let parsed;
+  const rawText = extractOpenRouterTextResponse(rawResponse);
   try {
-    parsed = JSON.parse(rawText);
+    JSON.parse(rawText);
   } catch (error) {
-    throw new Error(
-      `Anthropic returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`
-    );
+    throw new Error(`OpenRouter returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
   }
 
-  logEvent("info", "Anthropic analysis raw payload", {
-    requestId: trace ? trace.requestId : null,
-    model: requestBody.model,
-    rawPayloadJson: safeJsonStringify(parsed),
-    rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
-  });
-
-  const normalized = normalizeAnalysisResponse(parsed, payload);
-  if (config.identifySpans !== false && normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
-    logEvent("warn", "Anthropic analysis returned issues without evidence spans", {
-      requestId: trace ? trace.requestId : null,
+  const result = {
+    provider: "openrouter",
+    message: `OpenRouter responded successfully with model ${requestBody.model}.`,
+    details: {
       model: requestBody.model,
-      source: normalized.source,
-      rawPayloadJson: safeJsonStringify(parsed),
-      rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
-    });
-  }
-
-  return normalized;
+      latencyMs: elapsedMs(startedAtMs),
+      responseChars: rawText.length
+    }
+  };
+  logEvent("info", "OpenRouter connection test succeeded", result.details);
+  return result;
 }
 
 async function callOllamaAnalysis(payload, config, trace = null) {
@@ -1727,124 +1628,6 @@ async function callOllamaAnalysis(payload, config, trace = null) {
     });
   }
   return normalized;
-}
-
-async function testOpenAiConnection(config) {
-  if (!config.openAiApiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
-  }
-
-  const requestBody = {
-    model: config.openAiModel || DEFAULT_API_CONFIG.openAiModel,
-    input: 'Reply with JSON only: {"ok": true}',
-    max_output_tokens: 40,
-    text: {
-      format: {
-        type: "json_object"
-      },
-      verbosity: "low"
-    },
-    reasoning: {
-      effort: "minimal"
-    }
-  };
-
-  const startedAtMs = nowMs();
-  logEvent("info", "Sending OpenAI connection test", {
-    model: requestBody.model
-  });
-
-  const response = await fetchWithTimeout(OPENAI_RESPONSES_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.openAiApiKey}`
-    },
-    body: JSON.stringify(requestBody)
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
-  }
-
-  const rawResponse = await response.json();
-  const rawText = extractOpenAiTextResponse(rawResponse);
-  try {
-    JSON.parse(rawText);
-  } catch (error) {
-    throw new Error(`OpenAI returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
-  }
-
-  const result = {
-    provider: "openai",
-    message: `OpenAI responded successfully with model ${requestBody.model}.`,
-    details: {
-      model: requestBody.model,
-      latencyMs: elapsedMs(startedAtMs),
-      responseChars: rawText.length
-    }
-  };
-  logEvent("info", "OpenAI connection test succeeded", result.details);
-  return result;
-}
-
-async function testAnthropicConnection(config) {
-  if (!config.anthropicApiKey) {
-    throw new Error("Anthropic API key is missing. Add it in the extension popup.");
-  }
-
-  const requestBody = {
-    model: config.anthropicModel || DEFAULT_API_CONFIG.anthropicModel,
-    system: "Reply with JSON only.",
-    messages: [
-      {
-        role: "user",
-        content: 'Reply with JSON only: {"ok": true}'
-      }
-    ],
-    max_tokens: 40
-  };
-
-  const startedAtMs = nowMs();
-  logEvent("info", "Sending Anthropic connection test", {
-    model: requestBody.model
-  });
-
-  const response = await fetchWithTimeout(ANTHROPIC_MESSAGES_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": config.anthropicApiKey,
-      "anthropic-version": ANTHROPIC_API_VERSION
-    },
-    body: JSON.stringify(requestBody)
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Anthropic API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
-  }
-
-  const rawResponse = await response.json();
-  const rawText = extractAnthropicTextResponse(rawResponse);
-  try {
-    JSON.parse(rawText);
-  } catch (error) {
-    throw new Error(`Anthropic returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
-  }
-
-  const result = {
-    provider: "anthropic",
-    message: `Anthropic responded successfully with model ${requestBody.model}.`,
-    details: {
-      model: requestBody.model,
-      latencyMs: elapsedMs(startedAtMs),
-      responseChars: rawText.length
-    }
-  };
-  logEvent("info", "Anthropic connection test succeeded", result.details);
-  return result;
 }
 
 async function testLocalEndpointConnection(config) {
@@ -1991,28 +1774,6 @@ async function testProviderConnection(configOverride) {
     return await testManagedActivationConnection(config);
   }
 
-  if (normalizeProviderSelection(config.provider) === "complementary") {
-    const openAiResult = await testOpenAiConnection({
-      ...config,
-      provider: "openai"
-    });
-    const anthropicResult = await testAnthropicConnection({
-      ...config,
-      provider: "anthropic"
-    });
-    const result = buildFriendlyConnectionResult(
-      true,
-      "Connection test succeeded. OpenAI and Anthropic are both ready.",
-      {
-        openai: openAiResult.details || null,
-        anthropic: anthropicResult.details || null
-      },
-      "complementary_success"
-    );
-    logEvent("info", "Complementary provider connection test succeeded", result.details);
-    return result;
-  }
-
   const provider = resolveProviderForPayload(config, null);
   logEvent("info", "Starting analysis provider connection test", {
     provider
@@ -2055,36 +1816,34 @@ async function analyzeLatestTurn(payload, trace = null) {
   let result;
   try {
     if (setupMode === "basic") {
-      if (provider !== "openai") {
-        throw new Error("Managed activation-code mode currently supports OpenAI only.");
+      if (provider !== "openrouter") {
+        throw new Error("Managed activation-code mode currently supports OpenRouter only.");
       }
       const requestBody = {
-        model: config.openAiModel || DEFAULT_API_CONFIG.openAiModel,
-        input: buildOpenAiMessages(payload),
-        max_output_tokens: 700,
-        text: {
-          format: {
-            type: "json_object"
-          },
-          verbosity: "low"
+        model: resolveOpenRouterModel(config, payload),
+        messages: buildOpenRouterMessages(payload),
+        max_tokens: resolveOpenRouterModel(config, payload) === "openai/gpt-5-mini" ? 1200 : 700,
+        response_format: {
+          type: "json_object"
         },
         reasoning: {
           effort: "minimal"
-        }
+        },
+        surface_host: getHostnameFromPageUrl(payload && payload.pageUrl ? payload.pageUrl : "")
       };
-      logEvent("info", "Sending managed OpenAI analysis relay request", {
+      logEvent("info", "Sending managed OpenRouter analysis relay request", {
         requestId: trace ? trace.requestId : null,
         model: requestBody.model,
         conversationId: payload.conversationId || null,
         ...extractManagedSessionMetadata(config)
       });
-      const managedResult = await callManagedAccessWithSession("managed_openai_analyze", config, {
+      const managedResult = await callManagedAccessWithSession("managed_openrouter_analyze", config, {
         analysis_payload: requestBody
       });
       const relayResponse = managedResult.response;
       const rawResponse = relayResponse.raw_response || {};
-      const rawText = extractOpenAiTextResponse(rawResponse);
-      logEvent("info", "Received managed OpenAI analysis response", {
+      const rawText = extractOpenRouterTextResponse(rawResponse);
+      logEvent("info", "Received managed OpenRouter analysis response", {
         requestId: trace ? trace.requestId : null,
         model: requestBody.model,
         responseChars: rawText.length
@@ -2093,11 +1852,11 @@ async function analyzeLatestTurn(payload, trace = null) {
       try {
         parsed = JSON.parse(rawText);
       } catch (error) {
-        throw new Error(`Managed OpenAI returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
+        throw new Error(`Managed OpenRouter returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
       }
       result = normalizeAnalysisResponse(parsed, payload);
     } else {
-    result = await getProviderAdapter(provider).analyze(payload, config, trace);
+      result = await getProviderAdapter(provider).analyze(payload, config, trace);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown analysis error";
@@ -2142,19 +1901,12 @@ async function analyzeLatestTurn(payload, trace = null) {
 }
 
 const PROVIDER_ADAPTERS = {
-  openai: {
-    id: "openai",
-    label: "OpenAI",
-    settingsSections: ["openai"],
-    analyze: callOpenAiAnalysis,
-    testConnection: testOpenAiConnection
-  },
-  anthropic: {
-    id: "anthropic",
-    label: "Anthropic",
-    settingsSections: ["anthropic"],
-    analyze: callAnthropicAnalysis,
-    testConnection: testAnthropicConnection
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    settingsSections: ["openrouter"],
+    analyze: callOpenRouterAnalysis,
+    testConnection: testOpenRouterConnection
   },
   local: {
     id: "local",
@@ -2173,25 +1925,20 @@ const PROVIDER_ADAPTERS = {
 };
 
 function getProviderAdapter(provider) {
-  return PROVIDER_ADAPTERS[normalizeProviderName(provider)] || PROVIDER_ADAPTERS.openai;
+  return PROVIDER_ADAPTERS[normalizeProviderName(provider)] || PROVIDER_ADAPTERS.openrouter;
 }
 
 function getProviderDefinitions() {
   return [
     {
-      id: "openai",
-      label: "OpenAI",
-      settingsSections: ["openai"]
-    },
-    {
-      id: "anthropic",
-      label: "Anthropic",
-      settingsSections: ["anthropic"]
-    },
-    {
       id: "complementary",
       label: "Complementary provider",
-      settingsSections: ["openai", "anthropic"]
+      settingsSections: []
+    },
+    {
+      id: "openrouter",
+      label: "OpenRouter",
+      settingsSections: ["openrouter"]
     }
   ];
 }

@@ -16,8 +16,7 @@
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://claude.ai/*",
-    "https://api.openai.com/*",
-    "https://api.anthropic.com/*",
+    "https://openrouter.ai/*",
     "https://bjokhkmomdogymmmnpdo.supabase.co/*",
     "http://127.0.0.1/*",
     "http://localhost/*"

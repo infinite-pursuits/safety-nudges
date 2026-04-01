@@ -1,5 +1,5 @@
 const DEFAULT_CONFIG = {
-  provider: "openai",
+  provider: "complementary",
   enabled: true,
   setupMode: "advanced",
   onboardingComplete: false,
@@ -11,10 +11,28 @@ const DEFAULT_CONFIG = {
   managedRefreshExpiresAt: "",
   managedAllocationId: "",
   managedProviderProjectId: "",
-  openAiApiKey: "",
-  openAiModel: "gpt-5-mini",
-  anthropicApiKey: "",
-  anthropicModel: "claude-sonnet-4-6"
+  managedModelPolicy: null,
+  openrouterApiKey: "",
+  openrouterModel: ""
+};
+const STATIC_OPENROUTER_MODEL_POLICY = {
+  catalog_version: "2026-03-31",
+  latest_sonnet_model_id: "anthropic/claude-sonnet-4.6",
+  default_models_by_surface: {
+    "claude.ai": "openai/gpt-5-mini",
+    "chatgpt.com": "anthropic/claude-sonnet-4.6",
+    "chat.openai.com": "anthropic/claude-sonnet-4.6"
+  },
+  curated_models: [
+    { id: "openai/gpt-5-mini", label: "OpenAI: GPT-5 Mini" },
+    { id: "anthropic/claude-sonnet-4.6", label: "Anthropic: Claude Sonnet 4.6" },
+    { id: "google/gemini-2.5-flash", label: "Google: Gemini 2.5 Flash" },
+    { id: "google/gemini-2.5-pro", label: "Google: Gemini 2.5 Pro" },
+    { id: "meta-llama/llama-4-maverick", label: "Meta: Llama 4 Maverick" },
+    { id: "mistralai/mistral-medium-3.1", label: "Mistral: Medium 3.1" },
+    { id: "qwen/qwen3-coder", label: "Qwen: Qwen3 Coder" },
+    { id: "qwen/qwen3-235b-a22b", label: "Qwen: Qwen3 235B A22B" }
+  ]
 };
 
 const AUTO_SAVE_DELAY_MS = 250;
@@ -47,10 +65,8 @@ const analysisDisclosureNode = document.getElementById("analysis-disclosure");
 const openAdvancedSettingsButton = document.getElementById("open-advanced-settings");
 const closeAdvancedSettingsButton = document.getElementById("close-advanced-settings");
 const advancedTestConnectionButton = document.getElementById("advanced-test-connection");
-const openAiKeyNode = document.getElementById("openai-key");
-const openAiModelNode = document.getElementById("openai-model");
-const anthropicKeyNode = document.getElementById("anthropic-key");
-const anthropicModelNode = document.getElementById("anthropic-model");
+const openrouterKeyNode = document.getElementById("openrouter-key");
+const openrouterModelNode = document.getElementById("openrouter-model");
 const activityLogNode = document.getElementById("activity-log");
 const advancedConnectionStatusNode = document.getElementById("advanced-connection-status");
 const advancedAnalysisDisclosureNode = document.getElementById("advanced-analysis-disclosure");
@@ -87,8 +103,12 @@ function normalizeLoadedConfig(config) {
     ...(config || {})
   };
 
+  if (merged.provider !== "openrouter" && merged.provider !== "complementary") {
+    merged.provider = DEFAULT_CONFIG.provider;
+  }
+
   if (!merged.onboardingComplete) {
-    const hasLegacySetup = Boolean(merged.openAiApiKey) || Boolean(merged.anthropicApiKey);
+    const hasLegacySetup = Boolean(merged.openrouterApiKey);
     if (hasLegacySetup) {
       merged.onboardingComplete = true;
       merged.setupMode = merged.setupMode || "advanced";
@@ -96,6 +116,42 @@ function normalizeLoadedConfig(config) {
   }
 
   return merged;
+}
+
+function getOpenRouterModelPolicy(config) {
+  return config && config.managedModelPolicy && typeof config.managedModelPolicy === "object"
+    ? config.managedModelPolicy
+    : STATIC_OPENROUTER_MODEL_POLICY;
+}
+
+function refreshOpenRouterModelOptions(selectedValue) {
+  if (!openrouterModelNode) {
+    return;
+  }
+
+  const policy = getOpenRouterModelPolicy(state.config);
+  const curatedModels = Array.isArray(policy.curated_models) ? policy.curated_models : [];
+  const nextValue = selectedValue || state.config.openrouterModel || DEFAULT_CONFIG.openrouterModel;
+  openrouterModelNode.innerHTML = "";
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select model";
+  placeholder.disabled = true;
+  placeholder.hidden = true;
+  placeholder.selected = !nextValue;
+  openrouterModelNode.appendChild(placeholder);
+
+  curatedModels.forEach((entry) => {
+    if (!entry || typeof entry !== "object" || !entry.id) {
+      return;
+    }
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.label || entry.id;
+    option.selected = entry.id === nextValue;
+    openrouterModelNode.appendChild(option);
+  });
 }
 
 function setConnectionStatus(message, tone = "muted") {
@@ -183,10 +239,9 @@ function buildConfigPatch() {
     onboardingComplete: state.config.onboardingComplete,
     managedEmail: managedEmailNode ? managedEmailNode.value.trim().toLowerCase() : state.config.managedEmail,
     managedAccessKey: managedKeyNode ? managedKeyNode.value.trim() : state.config.managedAccessKey,
-    openAiApiKey: openAiKeyNode ? openAiKeyNode.value.trim() : state.config.openAiApiKey,
-    openAiModel: openAiModelNode ? openAiModelNode.value.trim() : state.config.openAiModel,
-    anthropicApiKey: anthropicKeyNode ? anthropicKeyNode.value.trim() : state.config.anthropicApiKey,
-    anthropicModel: anthropicModelNode ? anthropicModelNode.value.trim() : state.config.anthropicModel
+    managedModelPolicy: state.config.managedModelPolicy,
+    openrouterApiKey: openrouterKeyNode ? openrouterKeyNode.value.trim() : state.config.openrouterApiKey,
+    openrouterModel: openrouterModelNode ? openrouterModelNode.value.trim() : state.config.openrouterModel
   };
 }
 
@@ -231,23 +286,13 @@ function syncFieldIntoState(node) {
     return;
   }
 
-  if (node === openAiKeyNode) {
-    state.config.openAiApiKey = openAiKeyNode.value.trim();
+  if (node === openrouterKeyNode) {
+    state.config.openrouterApiKey = openrouterKeyNode.value.trim();
     return;
   }
 
-  if (node === openAiModelNode) {
-    state.config.openAiModel = openAiModelNode.value.trim();
-    return;
-  }
-
-  if (node === anthropicKeyNode) {
-    state.config.anthropicApiKey = anthropicKeyNode.value.trim();
-    return;
-  }
-
-  if (node === anthropicModelNode) {
-    state.config.anthropicModel = anthropicModelNode.value.trim();
+  if (node === openrouterModelNode) {
+    state.config.openrouterModel = openrouterModelNode.value.trim();
     return;
   }
 
@@ -274,17 +319,12 @@ function applyStateToInputs() {
     node.checked = node.value === state.config.provider;
   }
 
-  if (openAiKeyNode) {
-    openAiKeyNode.value = state.config.openAiApiKey || "";
+  if (openrouterKeyNode) {
+    openrouterKeyNode.value = state.config.openrouterApiKey || "";
   }
-  if (openAiModelNode) {
-    openAiModelNode.value = state.config.openAiModel || DEFAULT_CONFIG.openAiModel;
-  }
-  if (anthropicKeyNode) {
-    anthropicKeyNode.value = state.config.anthropicApiKey || "";
-  }
-  if (anthropicModelNode) {
-    anthropicModelNode.value = state.config.anthropicModel || DEFAULT_CONFIG.anthropicModel;
+  refreshOpenRouterModelOptions(state.config.openrouterModel || DEFAULT_CONFIG.openrouterModel);
+  if (openrouterModelNode) {
+    openrouterModelNode.value = state.config.openrouterModel || DEFAULT_CONFIG.openrouterModel;
   }
 }
 
@@ -362,19 +402,19 @@ function render() {
 
 function buildAnalysisDisclosure(config) {
   const setupMode = config && config.setupMode === "basic" ? "basic" : "advanced";
+  const provider = config && config.provider === "openrouter" ? "openrouter" : "complementary";
   if (setupMode === "basic") {
-    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure so OpenAI can analyze it.";
+    if (provider === "openrouter") {
+      return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis using your selected model.";
+    }
+    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis using complementary defaults by site.";
   }
 
-  if (config && config.provider === "anthropic") {
-    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to Anthropic for analysis.";
+  if (provider === "openrouter") {
+    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenRouter for analysis using your selected model.";
   }
 
-  if (config && config.provider === "complementary") {
-    return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to Anthropic on chatgpt.com and to OpenAI on claude.ai.";
-  }
-
-  return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenAI for analysis.";
+  return "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenRouter for analysis using complementary defaults by site.";
 }
 
 function buildDataUseDescription(config) {
@@ -625,24 +665,13 @@ async function runAdvancedConnectionTest() {
       }
     });
   }
-  if ((state.config.openAiApiKey || "").trim()) {
+  if ((state.config.openrouterApiKey || "").trim()) {
     checks.push({
-      label: "OpenAI",
+      label: "OpenRouter",
       config: {
         ...state.config,
         setupMode: "advanced",
-        provider: "openai",
-        onboardingComplete: true
-      }
-    });
-  }
-  if ((state.config.anthropicApiKey || "").trim()) {
-    checks.push({
-      label: "Anthropic",
-      config: {
-        ...state.config,
-        setupMode: "advanced",
-        provider: "anthropic",
+        provider: "openrouter",
         onboardingComplete: true
       }
     });
@@ -653,7 +682,7 @@ async function runAdvancedConnectionTest() {
     stopFastActivityPolling();
     state.isTestingConnection = false;
     render();
-    setAdvancedConnectionStatus("❌ No managed session, activation email + code, or API keys are available to test.", "error");
+    setAdvancedConnectionStatus("❌ No managed session, activation email + code, or OpenRouter key is available to test.", "error");
     return;
   }
 
@@ -703,6 +732,7 @@ async function runAdvancedConnectionTest() {
 function chooseAdvancedSetup() {
   state.config = {
     ...state.config,
+    provider: "complementary",
     setupMode: "advanced",
     onboardingComplete: true
   };
@@ -804,10 +834,8 @@ providerRadioNodes.forEach((node) => {
   attachFieldAutoSave(node, "change");
 });
 
-attachFieldAutoSave(openAiKeyNode);
-attachFieldAutoSave(openAiModelNode);
-attachFieldAutoSave(anthropicKeyNode);
-attachFieldAutoSave(anthropicModelNode);
+attachFieldAutoSave(openrouterKeyNode);
+attachFieldAutoSave(openrouterModelNode, "change");
 attachFieldAutoSave(managedEmailNode);
 attachFieldAutoSave(managedEmailAdvancedNode);
 attachFieldAutoSave(managedKeyNode);
