@@ -24,6 +24,8 @@ const DEFAULT_API_CONFIG = {
   managedSessionExpiresAt: "",
   managedRefreshExpiresAt: "",
   managedAllocationId: "",
+  managedPilotFeedbackEnabled: false,
+  managedFeedbackParticipantId: "",
   managedProviderProjectId: "",
   managedModelPolicy: null,
   openrouterApiKey: "",
@@ -229,6 +231,8 @@ function clearManagedSessionFields(config) {
     managedSessionExpiresAt: "",
     managedRefreshExpiresAt: "",
     managedAllocationId: "",
+    managedPilotFeedbackEnabled: false,
+    managedFeedbackParticipantId: "",
     managedProviderProjectId: "",
     managedModelPolicy: null
   };
@@ -262,6 +266,9 @@ function applyManagedSessionToConfig(config, response) {
     managedRefreshExpiresAt:
       managedSession && typeof managedSession.refresh_expires_at === "string" ? managedSession.refresh_expires_at : "",
     managedAllocationId: response && typeof response.allocation_id === "string" ? response.allocation_id : "",
+    managedPilotFeedbackEnabled: Boolean(response && response.pilot_feedback_enabled),
+    managedFeedbackParticipantId:
+      response && typeof response.feedback_participant_id === "string" ? response.feedback_participant_id : "",
     managedProviderProjectId:
       response && typeof response.provider_project_id === "string" ? response.provider_project_id : ""
   };
@@ -270,6 +277,8 @@ function applyManagedSessionToConfig(config, response) {
 function extractManagedSessionMetadata(config) {
   return {
     allocationId: config.managedAllocationId || null,
+    pilotFeedbackEnabled: Boolean(config.managedPilotFeedbackEnabled),
+    feedbackParticipantId: config.managedFeedbackParticipantId || null,
     providerProjectId: config.managedProviderProjectId || null,
     accessExpiresAt: config.managedSessionExpiresAt || null,
     refreshExpiresAt: config.managedRefreshExpiresAt || null
@@ -543,6 +552,8 @@ function getPersistedApiConfig(config) {
     managedSessionExpiresAt: config.managedSessionExpiresAt,
     managedRefreshExpiresAt: config.managedRefreshExpiresAt,
     managedAllocationId: config.managedAllocationId,
+    managedPilotFeedbackEnabled: Boolean(config.managedPilotFeedbackEnabled),
+    managedFeedbackParticipantId: config.managedFeedbackParticipantId,
     managedProviderProjectId: config.managedProviderProjectId,
     managedModelPolicy: config.managedModelPolicy,
     openrouterModel: config.openrouterModel,
@@ -603,6 +614,14 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
       typeof config.managedAllocationId === "string"
         ? config.managedAllocationId.trim()
         : existing.managedAllocationId || DEFAULT_API_CONFIG.managedAllocationId,
+    managedPilotFeedbackEnabled:
+      typeof config.managedPilotFeedbackEnabled === "boolean"
+        ? config.managedPilotFeedbackEnabled
+        : Boolean(existing.managedPilotFeedbackEnabled),
+    managedFeedbackParticipantId:
+      typeof config.managedFeedbackParticipantId === "string"
+        ? config.managedFeedbackParticipantId.trim()
+        : existing.managedFeedbackParticipantId || DEFAULT_API_CONFIG.managedFeedbackParticipantId,
     managedProviderProjectId:
       typeof config.managedProviderProjectId === "string"
         ? config.managedProviderProjectId.trim()
@@ -1099,6 +1118,10 @@ function buildSupabaseFeedbackRow(payload, config) {
   return {
     submitted_at: payload && payload.submitted_at ? payload.submitted_at : nowIso(),
     page_url: payload && payload.page_url ? payload.page_url : null,
+    participant_id:
+      config && config.managedPilotFeedbackEnabled && typeof config.managedFeedbackParticipantId === "string" && config.managedFeedbackParticipantId.trim()
+        ? config.managedFeedbackParticipantId.trim()
+        : null,
     conversation_id: payload && payload.conversation_id ? payload.conversation_id : null,
     turn_id: payload && payload.turn_id ? payload.turn_id : null,
     model_id: payload && payload.model_id ? payload.model_id : null,

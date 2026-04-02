@@ -11,6 +11,8 @@ const DEFAULT_CONFIG = {
   managedSessionExpiresAt: "",
   managedRefreshExpiresAt: "",
   managedAllocationId: "",
+  managedPilotFeedbackEnabled: false,
+  managedFeedbackParticipantId: "",
   managedProviderProjectId: "",
   managedModelPolicy: null,
   openrouterApiKey: "",
@@ -101,38 +103,9 @@ const state = {
   }
 };
 
-const ANALYSIS_SENSITIVITY_OPTIONS = [
-  {
-    value: "permissive_strong",
-    label: "Very low",
-    description: "Flags fewer borderline issues and favors clearer evidence.",
-    disclosure: "lower"
-  },
-  {
-    value: "permissive_soft",
-    label: "Low",
-    description: "Flags a bit less often and skips some borderline cases.",
-    disclosure: "slightly lower"
-  },
-  {
-    value: "standard",
-    label: "Standard",
-    description: "Default setting. Flags a balanced range of issues.",
-    disclosure: "standard"
-  },
-  {
-    value: "conservative_soft",
-    label: "High",
-    description: "Flags a bit more often, including some borderline cases.",
-    disclosure: "slightly higher"
-  },
-  {
-    value: "conservative_strong",
-    label: "Very high",
-    description: "Flags more possible issues and errs toward caution.",
-    disclosure: "higher"
-  }
-];
+const ANALYSIS_SENSITIVITY_OPTIONS = Array.isArray(TAGGING_PROMPT.ANALYSIS_SENSITIVITY_OPTIONS)
+  ? TAGGING_PROMPT.ANALYSIS_SENSITIVITY_OPTIONS
+  : [];
 
 function normalizeLoadedConfig(config) {
   const merged = {
