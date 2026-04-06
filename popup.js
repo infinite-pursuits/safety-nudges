@@ -78,6 +78,8 @@ const activityLogNode = document.getElementById("activity-log");
 const advancedConnectionStatusNode = document.getElementById("advanced-connection-status");
 const advancedAnalysisDisclosureNode = document.getElementById("advanced-analysis-disclosure");
 const dataUseDescriptionNode = document.getElementById("data-use-description");
+const STATIC_DATA_USE_DESCRIPTION =
+  "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it. If you are in a pilot study, a pseudonymous ID may also be attached to your feedback.";
 
 const state = {
   config: { ...DEFAULT_CONFIG },
@@ -436,24 +438,15 @@ function render() {
       : "Safety Nudges is paused and will not analyze chat responses.";
   }
 
-  const analysisDisclosure = buildAnalysisDisclosure(state.config);
-  if (analysisDisclosureNode) {
-    analysisDisclosureNode.textContent = analysisDisclosure;
-  }
-  if (advancedAnalysisDisclosureNode) {
-    advancedAnalysisDisclosureNode.textContent = analysisDisclosure;
-  }
   if (dataUseDescriptionNode) {
-    dataUseDescriptionNode.textContent = buildDataUseDescription(state.config);
+    dataUseDescriptionNode.textContent = STATIC_DATA_USE_DESCRIPTION;
   }
   const sensitivityOption = getAnalysisSensitivityOption(state.config.analysisSensitivity);
   if (analysisSensitivityValueNode) {
     analysisSensitivityValueNode.textContent = sensitivityOption.label;
   }
   if (analysisSensitivityDescriptionNode) {
-    analysisSensitivityDescriptionNode.textContent = sensitivityOption.value === "standard"
-      ? "Standard is the default."
-      : sensitivityOption.description;
+    analysisSensitivityDescriptionNode.textContent = sensitivityOption.value === "standard" ? "" : sensitivityOption.description;
   }
   if (complementaryProviderDescriptionNode) {
     complementaryProviderDescriptionNode.textContent = buildComplementaryProviderDescription(state.config);
@@ -467,34 +460,6 @@ function render() {
     advancedTestConnectionButton.disabled = !onboardingComplete || state.isTestingConnection;
     advancedTestConnectionButton.textContent = state.isTestingConnection ? "Testing..." : "Test connection";
   }
-}
-
-function buildAnalysisDisclosure(config) {
-  const setupMode = config && config.setupMode === "basic" ? "basic" : "advanced";
-  const provider = config && config.provider === "openrouter" ? "openrouter" : "complementary";
-  const sensitivityLabel = getAnalysisSensitivityOption(config && config.analysisSensitivity).disclosure;
-  if (setupMode === "basic") {
-    if (provider === "openrouter") {
-      return `When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis using your selected model and ${sensitivityLabel} sensitivity.`;
-    }
-    return `When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis using complementary defaults by site and ${sensitivityLabel} sensitivity.`;
-  }
-
-  if (provider === "openrouter") {
-    return `When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenRouter for analysis using your selected model and ${sensitivityLabel} sensitivity.`;
-  }
-
-  return `When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history to OpenRouter for analysis using complementary defaults by site and ${sensitivityLabel} sensitivity.`;
-}
-
-function buildDataUseDescription(config) {
-  const analysisDisclosure = buildAnalysisDisclosure(config);
-  const managedClause =
-    config && config.setupMode === "basic"
-      ? " Safety Nudges managed access uses a scoped session token after onboarding, so ordinary analysis requests do not resend your activation code."
-      : "";
-
-  return `${analysisDisclosure}${managedClause} Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it.`;
 }
 
 function saveConfig(configPatch, options = {}) {

@@ -368,26 +368,26 @@
                 <span>Low</span>
                 <span>High</span>
               </div>
-              <p id="analysis-sensitivity-description" class="tiny">Standard is the default.</p>
+              <p id="analysis-sensitivity-description" class="tiny"></p>
             </div>
           </div>
+
+          <button id="toggle-enabled" class="toggle-button" type="button" data-enabled="true">Pause Safety Nudges</button>
+          <p id="toggle-description" class="tiny">Safety Nudges is currently watching supported chat pages.</p>
 
           <div class="stack">
             <button id="test-connection" class="action-button secondary" type="button">Test connection</button>
             <p id="connection-status" class="status-line" data-tone="muted">No connection test run yet.</p>
           </div>
-
-          <button id="toggle-enabled" class="toggle-button" type="button" data-enabled="true">Pause Safety Nudges</button>
-          <p id="toggle-description" class="tiny">Safety Nudges is currently watching supported chat pages.</p>
         </div>
 
-        <button id="open-advanced-settings" class="text-link" type="button">Advanced settings</button>
+        <button id="open-advanced-settings" class="text-link" type="button">Settings</button>
         <button id="open-data-use-main" class="text-link" type="button">Learn about data use</button>
       </div>
 
       <div id="advanced-screen" class="screen" hidden>
         <div class="header-row">
-          <h2>Advanced settings</h2>
+          <h2>Settings</h2>
           <button id="close-advanced-settings" class="back-button" type="button">Back</button>
         </div>
 
@@ -433,7 +433,7 @@
           <button id="close-data-use" class="back-button" type="button">Back</button>
         </div>
 
-        <p id="data-use-description" class="data-use-copy">When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history from the supported chat page to the selected analysis provider so it can generate a warning. If you use Safety Nudges managed access, those requests pass through Safety Nudges managed infrastructure using a scoped session token rather than your activation code. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it.</p>
+        <p id="data-use-description" class="data-use-copy">When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it. If you are in a pilot study, a pseudonymous ID may also be attached to your feedback.</p>
       </div>
     </div>
     <script src="tagging_prompt.js"></script>
