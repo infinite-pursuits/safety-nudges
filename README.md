@@ -1,61 +1,65 @@
-# Safety Nudges Extension
+# Safety Nudges
 
-This directory contains the active Step 2 Chrome extension baseline.
+Safety Nudges is a Chrome extension that audits chatbot conversations in real time by using an external LLM to screen for common problems.
 
-What is implemented:
-- Manifest V3 extension wiring for ChatGPT surfaces (`chatgpt.com` and `chat.openai.com`) plus Claude web (`claude.ai`).
-- A background service worker that routes managed analysis through Supabase/OpenRouter or uses a user-supplied OpenRouter key, then normalizes Step 1-style results.
-- A content script with host adapters for ChatGPT-style and Claude-style DOMs that waits for a quiet period after mutations and extracts the latest user prompt plus assistant response together with a bounded recent-history window.
-- A small lower-right in-page nudge that stays hidden unless an issue is detected (or debug mode is enabled).
-- A judgments-panel feedback flow with thumbs up/down, an optional short comment, an explicit consent checkbox, and direct Supabase persistence for submitted feedback.
-- A popup redesigned around nontechnical use: first-run activation-code vs advanced setup, a simple complementary-vs-model-selection route choice, a small main-screen sensitivity slider, a prominent play/pause control that starts paused on first install, and a settings screen for manual OpenRouter keys and logs.
+Supported sites:
+- `chatgpt.com`
+- `chat.openai.com`
+- `claude.ai`
 
-Testing visibility:
-- The background service worker logs request start, response receipt, latency, provider-specific metadata, no-issue completions, issue detections, and failures to the extension console.
-- The popup shows the same recent activity log so you can confirm the flow worked even when no issue was detected. Those logs remain in browser-local extension storage unless the user separately uses a feature that transmits data.
+## What It Does
 
-Using OpenRouter BYOK:
-- Open `Settings` and paste an OpenRouter API key.
-- Return to the main screen and either keep `Complementary provider` or choose `Choose your model`.
-- The extension sends OpenRouter chat-completions requests and expects JSON matching the Step 1 issue schema.
+- Watches supported chat pages after you explicitly enable it
+- Reads the current exchange plus a bounded window of recent conversation history
+- Sends that material to a hosted analysis route so the extension can decide whether to show a warning
+- Shows an in-page nudge when a potential issue is detected
+- Lets users optionally submit feedback on whether the nudge was helpful
 
-Using the popup:
-- On first run, users choose between `Use activation code` and `Advanced setup`, and analysis remains paused until the user explicitly turns it on.
-- `Use activation code` exchanges the user's email plus Safety Nudges activation code with the hosted Supabase Edge Function, receives a scoped managed session, and persists only that managed session locally for later sessions.
-- `Advanced setup` keeps manual OpenRouter API key entry available, but that key is kept only for the current browser session.
-- After setup, the main screen exposes `Complementary provider` plus `Choose your model`.
-- `Complementary provider` means route through the current OpenRouter default model for each supported surface.
-- `Choose your model` means route through OpenRouter with one selected model across supported surfaces.
-- `Analysis sensitivity` is a five-step slider on the main screen. The center `Standard` setting leaves the base prompt unchanged. Moving right asks the analyzer to flag more possible issues; moving left asks it to flag fewer.
-- Settings save automatically when changed.
-- The prominent play/pause button controls whether the extension analyzes anything at all. When paused, the content script should not show a transient `Checking response...` state.
+The extension starts paused when first installed.
 
-What is intentionally stubbed:
-- Hardening the host-adapter selectors against large upstream DOM churn beyond the current ChatGPT/Claude baseline heuristics.
+## Analysis Routes
 
-Judgment feedback contract:
-- Event name: `judgment_feedback_submitted`
-- Payload keys: `schema_version`, `source`, `submitted_at`, `page_url`, `conversation_id`, `turn_id`, `model_id`, `rating`, `comment`, `consent`, `judgment`, `latest_turn`, `chat_history`, `flags`
-- Consent contract: explicit opt-in is required before submit, with `consent.share_chat_history=true` and `consent.purposes=["research","training","product_improvement"]`
-- Judgment metadata for later API wiring: `conversation_id` as chat ID, `turn_id` as the judged-turn fingerprint, `model_id` from the analyzer result when available, plus `flags` for mock transport and anti-spam rules
+Safety Nudges supports two hosted paths:
+- managed access using a Safety Nudges activation code
+- manual OpenRouter setup using your own OpenRouter API key
 
-Feedback ingestion:
-- Transport: direct POST from the extension background worker to Supabase REST
-- Storage: `public.feedback_judgments` in Supabase Postgres
-- Idempotency: one row per judged response via a unique `(conversation_id, turn_id)` index
-- Raw auditability: each row stores extracted analytical columns plus a minimized `raw_payload` audit object
+Managed access exchanges the activation email and code once for a scoped managed session. The raw activation code is not kept locally after exchange.
 
-Failure and anti-spam behavior:
-- Offline submit attempts fail inline with a retryable message and do not send the mock event.
-- Only one successful submission is allowed per judged response fingerprint.
-- Comment length is capped at 280 characters.
-- Submit stays disabled while a request is in flight so repeated clicks do not duplicate events.
+Manual OpenRouter API keys are session-only and must be re-entered after Chrome restarts.
 
-Load this directory as an unpacked extension in Chrome to continue Step 2 development.
+## Data Behavior
 
-Automated browser harness:
-- For deterministic end-to-end extension validation, use the local fixture harness documented in `docs/extension/extension_automation_harness.md`.
-- The harness launches the real unpacked extension in Chrome, configures the popup automatically, serves ChatGPT-like and Claude-like fixtures on `127.0.0.1`, and drives assertions for panels, highlights, tooltips, invalid spans, and error states.
-- For the Claude DOM path specifically, use `python -m safety_nudges.extension.browser_harness fixture-probe --scenario claude-highlight --json`.
-- For real-page feedback verification without spending managed tokens, use `python -m safety_nudges.extension.browser_harness chatgpt-feedback-e2e --json`.
-- Live `claude.ai` smoke validation is intentionally separate from the deterministic harness path because it requires an authenticated Claude session/profile.
+When enabled, the extension sends the current user prompt, the current assistant response, a bounded recent-history window, the page URL, and a conversation identifier to remote services so it can analyze the exchange.
+
+Routine analysis does not by itself store chat history in Safety Nudges-hosted systems. Safety Nudges-hosted storage is used when a user explicitly opts in and submits feedback.
+
+The extension may keep limited browser-local extension storage for functionality, including:
+- scoped managed-session state
+- provider settings
+- recent activity-log entries shown in the popup
+
+## Privacy Policy
+
+The canonical public privacy policy for this extension is in [PRIVACY_POLICY.md](./PRIVACY_POLICY.md).
+
+If you publish this directory as its own GitHub repository, use the GitHub URL for that file as the public privacy-policy URL for the Chrome Web Store listing.
+
+## Local Development
+
+Load this directory as an unpacked extension in Chrome:
+
+1. Open `chrome://extensions`
+2. Enable Developer Mode
+3. Choose `Load unpacked`
+4. Select this directory
+
+## Repo Contents
+
+- `manifest.json`: Chrome extension manifest
+- `background.js`: background service worker
+- `content.js`: content script for supported chat surfaces
+- `content.css`: in-page UI styles
+- `popup.html`: extension popup UI
+- `popup.js`: popup behavior and settings flow
+- `tagging_prompt.js`: structured analysis prompt and sensitivity configuration
+- `icons/`: extension icons
