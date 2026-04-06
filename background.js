@@ -14,9 +14,6 @@ const DEFAULT_API_CONFIG = {
   identifySpans: true,
   setupMode: "advanced",
   onboardingComplete: false,
-  endpoint: "http://127.0.0.1:8787/analyze",
-  ollamaEndpoint: "http://127.0.0.1:11434/api/chat",
-  ollamaModel: "llama3.1:8b",
   managedEmail: "",
   managedAccessKey: "",
   managedSessionToken: "",
@@ -35,11 +32,8 @@ const SUPABASE_URL = "https://bjokhkmomdogymmmnpdo.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_KdngS39ZCxvJ854R0zy3xA_0LKy8nj5";
 const MANAGED_ACCESS_FUNCTION_NAME = "openrouter-alpha-user";
 const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_HTTP_REFERER = "https://github.com/jwedgwood/safety-nudges";
+const OPENROUTER_HTTP_REFERER = "https://github.com/jtbwedgwood/safety-nudges";
 const OPENROUTER_X_TITLE = "Safety Nudges";
-const DEFAULT_LOCAL_ANALYSIS_ENDPOINT = "http://127.0.0.1:8787/analyze";
-const DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/chat";
-const DEFAULT_OLLAMA_MODEL = "llama3.1:8b";
 const ANALYSIS_REQUEST_SCHEMA_VERSION = "1.1.0";
 const ANALYSIS_HISTORY_MAX_MESSAGES = 12;
 const ANALYSIS_HISTORY_MAX_CHARS_PER_MESSAGE = 4000;
@@ -144,22 +138,6 @@ function createAnalysisTrace(payload, fingerprint = null) {
     promptChars: payload && typeof payload.prompt === "string" ? payload.prompt.length : 0,
     responseChars: payload && typeof payload.response === "string" ? payload.response.length : 0
   };
-}
-
-function getRuntimeOrigin() {
-  if (typeof self === "undefined" || !self.location || typeof self.location.origin !== "string") {
-    return null;
-  }
-
-  return self.location.origin;
-}
-
-function formatNsToMs(nanoseconds) {
-  if (typeof nanoseconds !== "number" || !Number.isFinite(nanoseconds) || nanoseconds < 0) {
-    return null;
-  }
-
-  return Math.round((nanoseconds / 1_000_000) * 100) / 100;
 }
 
 async function fetchWithTimeout(resource, options = {}, timeoutMs = NETWORK_TIMEOUT_MS) {
@@ -416,23 +394,6 @@ async function callManagedAccessWithSession(action, config, payload = {}, option
   }
 }
 
-
-function formatOllamaHttpError(response, errorText, endpoint) {
-  const truncatedText = (errorText || "").slice(0, 300);
-  const runtimeOrigin = getRuntimeOrigin();
-
-  if (response && response.status === 403 && runtimeOrigin && runtimeOrigin.startsWith("chrome-extension://")) {
-    return (
-      `Ollama rejected this Chrome extension origin (${runtimeOrigin}). ` +
-      `Start Ollama with OLLAMA_ORIGINS="${runtimeOrigin}" or OLLAMA_ORIGINS="chrome-extension://*" ` +
-      `so ${endpoint} accepts requests from the extension, or switch to the Local endpoint provider ` +
-      `and run "python -m safety_nudges.extension.ollama_bridge" to proxy through a local server.`
-    );
-  }
-
-  return `Ollama API returned HTTP ${response.status}: ${truncatedText}`;
-}
-
 function safeJsonStringify(value, maxChars = 6000) {
   try {
     const serialized = JSON.stringify(value);
@@ -544,9 +505,6 @@ function getPersistedApiConfig(config) {
     identifySpans: config.identifySpans,
     setupMode: config.setupMode,
     onboardingComplete: config.onboardingComplete,
-    endpoint: config.endpoint,
-    ollamaEndpoint: config.ollamaEndpoint,
-    ollamaModel: config.ollamaModel,
     managedSessionToken: config.managedSessionToken,
     managedRefreshToken: config.managedRefreshToken,
     managedSessionExpiresAt: config.managedSessionExpiresAt,
@@ -574,18 +532,6 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
       typeof config.onboardingComplete === "boolean"
         ? config.onboardingComplete
         : Boolean(existing.onboardingComplete),
-    endpoint:
-      typeof config.endpoint === "string" && config.endpoint.trim()
-        ? config.endpoint.trim()
-        : existing.endpoint || DEFAULT_API_CONFIG.endpoint,
-    ollamaEndpoint:
-      typeof config.ollamaEndpoint === "string" && config.ollamaEndpoint.trim()
-        ? config.ollamaEndpoint.trim()
-        : existing.ollamaEndpoint || DEFAULT_API_CONFIG.ollamaEndpoint,
-    ollamaModel:
-      typeof config.ollamaModel === "string" && config.ollamaModel.trim()
-        ? config.ollamaModel.trim()
-        : existing.ollamaModel || DEFAULT_API_CONFIG.ollamaModel,
     managedEmail:
       typeof config.managedEmail === "string"
         ? config.managedEmail.trim().toLowerCase()
@@ -815,17 +761,11 @@ function buildAnalysisRequest(payload) {
 }
 
 function normalizeProviderName(value) {
-  return value === "local" || value === "ollama" ? value : "openrouter";
+  return value === "openrouter" ? value : "openrouter";
 }
 
 function normalizeProviderSelection(value) {
-  if (value === "complementary") {
-    return value;
-  }
-  if (value === "local" || value === "ollama") {
-    return value;
-  }
-  return "openrouter";
+  return value === "complementary" ? value : "openrouter";
 }
 
 function normalizeSetupMode(value) {
@@ -844,7 +784,7 @@ function getHostnameFromPageUrl(pageUrl) {
   }
 }
 
-function resolveProviderForPayload(config, payload = null) {
+function resolveProviderForPayload(config, _payload = null) {
   const selection = normalizeProviderSelection(config && config.provider ? config.provider : DEFAULT_API_CONFIG.provider);
   return normalizeProviderName(selection);
 }
@@ -1022,33 +962,6 @@ function extractOpenRouterTextResponse(response) {
   throw new Error("OpenRouter response did not contain output text.");
 }
 
-function extractOllamaTextResponse(response) {
-  const text = response && response.message && typeof response.message.content === "string" ? response.message.content : "";
-  if (!text.trim()) {
-    throw new Error("Ollama response did not contain message content.");
-  }
-
-  return text;
-}
-
-function summarizeOllamaResponse(response) {
-  return {
-    done: Boolean(response && response.done),
-    doneReason: response && typeof response.done_reason === "string" ? response.done_reason : null,
-    totalDurationMs: formatNsToMs(response && response.total_duration),
-    loadDurationMs: formatNsToMs(response && response.load_duration),
-    promptEvalCount: typeof (response && response.prompt_eval_count) === "number" ? response.prompt_eval_count : null,
-    evalCount: typeof (response && response.eval_count) === "number" ? response.eval_count : null,
-    thinkingChars:
-      response &&
-      response.message &&
-      typeof response.message.thinking === "string" &&
-      response.message.thinking.trim()
-        ? response.message.thinking.length
-        : 0
-  };
-}
-
 function createTestPayload() {
   return {
     pageUrl: "https://chatgpt.com/c/test-connection",
@@ -1079,33 +992,8 @@ function summarizeFeedbackPayload(payload) {
   };
 }
 
-function isLocalUrl(value) {
-  if (typeof value !== "string" || !value.trim()) {
-    return false;
-  }
-
-  try {
-    const url = new URL(value);
-    return url.hostname === "127.0.0.1" || url.hostname === "localhost";
-  } catch (_error) {
-    return false;
-  }
-}
-
 function inferFeedbackIsTest(config, payload) {
   if (payload && payload.flags && payload.flags.is_test === true) {
-    return true;
-  }
-
-  if (payload && typeof payload.page_url === "string" && payload.page_url.startsWith("http://127.0.0.1")) {
-    return true;
-  }
-
-  if (payload && typeof payload.page_url === "string" && payload.page_url.startsWith("http://localhost")) {
-    return true;
-  }
-
-  if (config && config.provider === "local" && isLocalUrl(config.endpoint)) {
     return true;
   }
 
@@ -1213,33 +1101,6 @@ async function submitFeedbackToSupabase(payload) {
     eventName: (payload && payload.event_name) || "judgment_feedback_submitted",
     receiptId
   };
-}
-
-function buildOllamaTagsUrl(endpoint) {
-  const fallback = "http://127.0.0.1:11434/api/tags";
-
-  try {
-    const url = new URL(endpoint || DEFAULT_OLLAMA_ENDPOINT);
-    url.pathname = "/api/tags";
-    url.search = "";
-    return url.toString();
-  } catch (_error) {
-    return fallback;
-  }
-}
-
-function modelNameMatches(requestedModel, candidateModel) {
-  if (!requestedModel || !candidateModel) {
-    return false;
-  }
-
-  if (requestedModel === candidateModel) {
-    return true;
-  }
-
-  const requestedBase = requestedModel.split(":")[0];
-  const candidateBase = candidateModel.split(":")[0];
-  return requestedModel === `${candidateBase}:latest` || candidateModel === `${requestedBase}:latest`;
 }
 
 function normalizeIssue(rawIssue, index) {
@@ -1371,63 +1232,6 @@ function normalizeAnalysisResponse(payload, requestPayload = null) {
     issues,
     source: "step1-schema"
   };
-}
-
-async function callLocalEndpointAnalysis(payload, config, trace = null) {
-  const startedAtMs = nowMs();
-  logEvent("info", "Sending local analysis request", {
-    requestId: trace ? trace.requestId : null,
-    endpoint: config.endpoint,
-    conversationId: payload.conversationId || null
-  });
-
-  const response = await fetchWithTimeout(config.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(buildAnalysisRequest(payload))
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    const truncatedError = errorText.slice(0, 500);
-    logEvent("error", "Local analysis endpoint returned an error response", {
-      requestId: trace ? trace.requestId : null,
-      endpoint: config.endpoint,
-      httpStatus: response.status,
-      responseBody: truncatedError
-    });
-    throw new Error(`Analysis endpoint returned HTTP ${response.status}: ${truncatedError}`);
-  }
-
-  const raw = await response.json();
-  const normalized = normalizeAnalysisResponse(raw, payload);
-  logEvent("info", "Local analysis raw payload", {
-    requestId: trace ? trace.requestId : null,
-    endpoint: config.endpoint,
-    rawPayloadJson: safeJsonStringify(raw),
-    rawIssueSpanSummary: summarizeRawIssueSpans(raw)
-  });
-  logEvent("info", "Received local analysis response", {
-    requestId: trace ? trace.requestId : null,
-    endpoint: config.endpoint,
-    httpStatus: response.status,
-    latencyMs: elapsedMs(startedAtMs),
-    source: normalized.source,
-    issueCount: Array.isArray(normalized.issues) ? normalized.issues.length : 0,
-    evidenceSpanCount: countEvidenceSpans(normalized.issues)
-  });
-  if (config.identifySpans !== false && normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
-    logEvent("warn", "Local analysis returned issues without evidence spans", {
-      requestId: trace ? trace.requestId : null,
-      endpoint: config.endpoint,
-      source: normalized.source,
-      rawPayloadJson: safeJsonStringify(raw),
-      rawIssueSpanSummary: summarizeRawIssueSpans(raw)
-    });
-  }
-  return normalized;
 }
 
 function resolveOpenRouterModel(config, payload = null) {
@@ -1590,214 +1394,6 @@ async function testOpenRouterConnection(config) {
   return result;
 }
 
-async function callOllamaAnalysis(payload, config, trace = null) {
-  const requestBody = {
-    model: config.ollamaModel || DEFAULT_OLLAMA_MODEL,
-    messages: buildOpenAiMessages(payload),
-    format: "json",
-    stream: false,
-    think: false
-  };
-
-  const endpoint = config.ollamaEndpoint || DEFAULT_OLLAMA_ENDPOINT;
-  const startedAtMs = nowMs();
-  logEvent("info", "Sending Ollama analysis request", {
-    requestId: trace ? trace.requestId : null,
-    endpoint,
-    model: requestBody.model,
-    conversationId: payload.conversationId || null
-  });
-
-  const response = await fetchWithTimeout(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(requestBody)
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(formatOllamaHttpError(response, errorText, endpoint));
-  }
-
-  const rawResponse = await response.json();
-  const rawText = extractOllamaTextResponse(rawResponse);
-  logEvent("info", "Received Ollama analysis response", {
-    requestId: trace ? trace.requestId : null,
-    endpoint,
-    model: requestBody.model,
-    httpStatus: response.status,
-    latencyMs: elapsedMs(startedAtMs),
-    responseChars: rawText.length,
-    responseMeta: summarizeOllamaResponse(rawResponse)
-  });
-
-  let parsed;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch (error) {
-    throw new Error(`Ollama returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
-  }
-
-  logEvent("info", "Ollama analysis raw payload", {
-    requestId: trace ? trace.requestId : null,
-    endpoint,
-    model: requestBody.model,
-    rawPayloadJson: safeJsonStringify(parsed),
-    rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
-  });
-
-  const normalized = normalizeAnalysisResponse(parsed, payload);
-  if (config.identifySpans !== false && normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
-    logEvent("warn", "Ollama analysis returned issues without evidence spans", {
-      requestId: trace ? trace.requestId : null,
-      endpoint,
-      model: requestBody.model,
-      source: normalized.source,
-      rawPayloadJson: safeJsonStringify(parsed),
-      rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
-    });
-  }
-  return normalized;
-}
-
-async function testLocalEndpointConnection(config) {
-  const startedAtMs = nowMs();
-  const payload = createTestPayload();
-  logEvent("info", "Sending local endpoint connection test", {
-    endpoint: config.endpoint
-  });
-
-  const response = await fetchWithTimeout(config.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(buildAnalysisRequest(payload))
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Analysis endpoint returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
-  }
-
-  const raw = await response.json();
-  const normalized = normalizeAnalysisResponse(raw);
-  const result = {
-    provider: "local",
-    message: `Local endpoint responded successfully from ${config.endpoint}.`,
-    details: {
-      endpoint: config.endpoint,
-      latencyMs: elapsedMs(startedAtMs),
-      normalizedSource: normalized.source
-    }
-  };
-  logEvent("info", "Local endpoint connection test succeeded", result.details);
-  return result;
-}
-
-async function testOllamaConnection(config) {
-  const tagsUrl = buildOllamaTagsUrl(config.ollamaEndpoint);
-  const model = config.ollamaModel || DEFAULT_OLLAMA_MODEL;
-  const tagsStartedAtMs = nowMs();
-  logEvent("info", "Checking Ollama model availability", {
-    endpoint: tagsUrl,
-    model
-  });
-
-  const tagsResponse = await fetchWithTimeout(tagsUrl, {
-    method: "GET"
-  });
-
-  if (!tagsResponse.ok) {
-    const errorText = await tagsResponse.text();
-    throw new Error(`Ollama model list returned HTTP ${tagsResponse.status}: ${errorText.slice(0, 300)}`);
-  }
-
-  const tagsPayload = await tagsResponse.json();
-  const models = Array.isArray(tagsPayload && tagsPayload.models) ? tagsPayload.models : [];
-  const availableModels = models
-    .map((entry) => {
-      if (entry && typeof entry.name === "string" && entry.name) {
-        return entry.name;
-      }
-      if (entry && typeof entry.model === "string" && entry.model) {
-        return entry.model;
-      }
-      return null;
-    })
-    .filter(Boolean);
-  const matchingModel = availableModels.find((candidate) => modelNameMatches(model, candidate));
-
-  if (!matchingModel) {
-    const sample = availableModels.slice(0, 6).join(", ");
-    throw new Error(
-      `Ollama is reachable, but model "${model}" is not installed. Pull it first with "ollama pull ${model}".` +
-        (sample ? ` Available models: ${sample}` : "")
-    );
-  }
-
-  const chatBody = {
-    model: matchingModel,
-    messages: [
-      {
-        role: "user",
-        content: 'Reply with JSON only: {"ok": true}'
-      }
-    ],
-    format: "json",
-    stream: false,
-    think: false,
-    keep_alive: 0,
-    options: {
-      temperature: 0,
-      num_predict: 16
-    }
-  };
-
-  const chatStartedAtMs = nowMs();
-  logEvent("info", "Sending Ollama connection test", {
-    endpoint: config.ollamaEndpoint,
-    model: matchingModel
-  });
-
-  const chatResponse = await fetchWithTimeout(config.ollamaEndpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(chatBody)
-  });
-
-  if (!chatResponse.ok) {
-    const errorText = await chatResponse.text();
-    throw new Error(formatOllamaHttpError(chatResponse, errorText, config.ollamaEndpoint));
-  }
-
-  const chatPayload = await chatResponse.json();
-  const rawText = extractOllamaTextResponse(chatPayload);
-  try {
-    JSON.parse(rawText);
-  } catch (error) {
-    throw new Error(`Ollama returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
-  }
-
-  const result = {
-    provider: "ollama",
-    message: `Ollama responded successfully with model ${matchingModel}.`,
-    details: {
-      model: matchingModel,
-      tagsLatencyMs: elapsedMs(tagsStartedAtMs),
-      chatLatencyMs: elapsedMs(chatStartedAtMs),
-      responseChars: rawText.length,
-      responseMeta: summarizeOllamaResponse(chatPayload)
-    }
-  };
-  logEvent("info", "Ollama connection test succeeded", result.details);
-  return result;
-}
-
 async function testProviderConnection(configOverride) {
   const storedConfig = await getStoredApiConfig();
   const config = buildApiConfig(configOverride || {}, storedConfig);
@@ -1946,20 +1542,6 @@ const PROVIDER_ADAPTERS = {
     settingsSections: ["openrouter"],
     analyze: callOpenRouterAnalysis,
     testConnection: testOpenRouterConnection
-  },
-  local: {
-    id: "local",
-    label: "Local endpoint",
-    settingsSections: ["local"],
-    analyze: callLocalEndpointAnalysis,
-    testConnection: testLocalEndpointConnection
-  },
-  ollama: {
-    id: "ollama",
-    label: "Ollama (local model)",
-    settingsSections: ["ollama"],
-    analyze: callOllamaAnalysis,
-    testConnection: testOllamaConnection
   }
 };
 

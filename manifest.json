@@ -17,9 +17,7 @@
     "https://chat.openai.com/*",
     "https://claude.ai/*",
     "https://openrouter.ai/*",
-    "https://bjokhkmomdogymmmnpdo.supabase.co/*",
-    "http://127.0.0.1/*",
-    "http://localhost/*"
+    "https://bjokhkmomdogymmmnpdo.supabase.co/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -39,9 +37,7 @@
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
-        "https://claude.ai/*",
-        "http://127.0.0.1/*",
-        "http://localhost/*"
+        "https://claude.ai/*"
       ],
       "js": [
         "content.js"
