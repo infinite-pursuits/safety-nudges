@@ -64,6 +64,7 @@ const testConnectionButton = document.getElementById("test-connection");
 const connectionStatusNode = document.getElementById("connection-status");
 const toggleEnabledButton = document.getElementById("toggle-enabled");
 const toggleDescriptionNode = document.getElementById("toggle-description");
+const complementaryProviderDescriptionNode = document.getElementById("complementary-provider-description");
 const analysisDisclosureNode = document.getElementById("analysis-disclosure");
 const openAdvancedSettingsButton = document.getElementById("open-advanced-settings");
 const closeAdvancedSettingsButton = document.getElementById("close-advanced-settings");
@@ -149,6 +150,23 @@ function getOpenRouterModelPolicy(config) {
   return config && config.managedModelPolicy && typeof config.managedModelPolicy === "object"
     ? config.managedModelPolicy
     : STATIC_OPENROUTER_MODEL_POLICY;
+}
+
+function getDefaultModelForSurface(policy, hostname, fallback = "") {
+  const defaults = policy && typeof policy.default_models_by_surface === "object" ? policy.default_models_by_surface : {};
+  return typeof defaults[hostname] === "string" && defaults[hostname].trim() ? defaults[hostname].trim() : fallback;
+}
+
+function buildComplementaryProviderDescription(config) {
+  const policy = getOpenRouterModelPolicy(config);
+  const claudeModel = getDefaultModelForSurface(policy, "claude.ai", "openai/gpt-5-mini");
+  const chatgptModel =
+    getDefaultModelForSurface(
+      policy,
+      "chatgpt.com",
+      getDefaultModelForSurface(policy, "chat.openai.com", "anthropic/claude-sonnet-4.6")
+    );
+  return `Use ${claudeModel} on claude.ai and ${chatgptModel} on chatgpt.com.`;
 }
 
 function refreshOpenRouterModelOptions(selectedValue) {
@@ -436,6 +454,9 @@ function render() {
     analysisSensitivityDescriptionNode.textContent = sensitivityOption.value === "standard"
       ? "Standard is the default."
       : sensitivityOption.description;
+  }
+  if (complementaryProviderDescriptionNode) {
+    complementaryProviderDescriptionNode.textContent = buildComplementaryProviderDescription(state.config);
   }
 
   if (testConnectionButton) {
