@@ -1,6 +1,6 @@
 const DEFAULT_CONFIG = {
   provider: "complementary",
-  enabled: true,
+  enabled: false,
   analysisSensitivity: "standard",
   setupMode: "advanced",
   onboardingComplete: false,

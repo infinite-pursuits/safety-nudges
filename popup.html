@@ -301,7 +301,7 @@
     <div class="shell">
       <div class="intro">
         <h1>Safety Nudges</h1>
-        <p>Safety Nudges provides real-time auditing of chatbot conversations to screen for common problems. Available on <code>chatgpt.com</code> and <code>claude.ai</code>.</p>
+        <p>Safety Nudges audits chatbot conversations in real time by using an external LLM to screen for common problems. Available on <code>chatgpt.com</code> and <code>claude.ai</code>.</p>
       </div>
 
       <div id="onboarding-screen" class="screen" hidden>
@@ -372,8 +372,8 @@
             </div>
           </div>
 
-          <button id="toggle-enabled" class="toggle-button" type="button" data-enabled="true">Pause Safety Nudges</button>
-          <p id="toggle-description" class="tiny">Safety Nudges is currently watching supported chat pages.</p>
+          <button id="toggle-enabled" class="toggle-button" type="button" data-enabled="false">Resume Safety Nudges</button>
+          <p id="toggle-description" class="tiny">Safety Nudges is paused and will not analyze chat responses.</p>
 
           <div class="stack">
             <button id="test-connection" class="action-button secondary" type="button">Test connection</button>

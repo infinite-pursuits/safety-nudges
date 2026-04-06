@@ -8,11 +8,11 @@ What is implemented:
 - A content script with host adapters for ChatGPT-style and Claude-style DOMs that waits for a quiet period after mutations and extracts the latest user prompt plus assistant response together with a bounded recent-history window.
 - A small lower-right in-page nudge that stays hidden unless an issue is detected (or debug mode is enabled).
 - A judgments-panel feedback flow with thumbs up/down, an optional short comment, an explicit consent checkbox, and direct Supabase persistence for submitted feedback.
-- A popup redesigned around nontechnical use: first-run activation-code vs advanced setup, a simple complementary-vs-model-selection route choice, a small main-screen sensitivity slider, a prominent play/pause control, and a settings screen for manual OpenRouter keys and logs.
+- A popup redesigned around nontechnical use: first-run activation-code vs advanced setup, a simple complementary-vs-model-selection route choice, a small main-screen sensitivity slider, a prominent play/pause control that starts paused on first install, and a settings screen for manual OpenRouter keys and logs.
 
 Testing visibility:
 - The background service worker logs request start, response receipt, latency, provider-specific metadata, no-issue completions, issue detections, and failures to the extension console.
-- The popup shows the same recent activity log so you can confirm the flow worked even when no issue was detected.
+- The popup shows the same recent activity log so you can confirm the flow worked even when no issue was detected. Those logs remain in browser-local extension storage unless the user separately uses a feature that transmits data.
 
 Using OpenRouter BYOK:
 - Open `Settings` and paste an OpenRouter API key.
@@ -20,7 +20,7 @@ Using OpenRouter BYOK:
 - The extension sends OpenRouter chat-completions requests and expects JSON matching the Step 1 issue schema.
 
 Using the popup:
-- On first run, users choose between `Use activation code` and `Advanced setup`.
+- On first run, users choose between `Use activation code` and `Advanced setup`, and analysis remains paused until the user explicitly turns it on.
 - `Use activation code` exchanges the user's email plus Safety Nudges activation code with the hosted Supabase Edge Function, receives a scoped managed session, and persists only that managed session locally for later sessions.
 - `Advanced setup` keeps manual OpenRouter API key entry available, but that key is kept only for the current browser session.
 - After setup, the main screen exposes `Complementary provider` plus `Choose your model`.

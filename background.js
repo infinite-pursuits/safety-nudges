@@ -9,7 +9,7 @@ const DEFAULT_ANALYSIS_RESULT = {
 
 const DEFAULT_API_CONFIG = {
   provider: "complementary",
-  enabled: true,
+  enabled: false,
   analysisSensitivity: "standard",
   identifySpans: true,
   setupMode: "advanced",
