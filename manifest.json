@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Safety Nudges",
   "version": "0.1.0",
-  "description": "Safety Nudges extension baseline for ChatGPT and Claude surfaces.",
+  "description": "Safety Nudges audits chatbot conversations in real time to screen for common problems.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
