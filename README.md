@@ -15,8 +15,6 @@ Supported sites:
 - Shows an in-page nudge when a potential issue is detected
 - Lets users optionally submit feedback on whether the nudge was helpful
 
-The extension starts paused when first installed.
-
 ## Analysis Routes
 
 Safety Nudges supports two hosted paths:
@@ -41,8 +39,6 @@ The extension may keep limited browser-local extension storage for functionality
 ## Privacy Policy
 
 The canonical public privacy policy for this extension is in [PRIVACY_POLICY.md](./PRIVACY_POLICY.md).
-
-If you publish this directory as its own GitHub repository, use the GitHub URL for that file as the public privacy-policy URL for the Chrome Web Store listing.
 
 ## Local Development
 
