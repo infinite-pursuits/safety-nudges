@@ -17,7 +17,6 @@ const FEEDBACK_FAILURE_EVENT = "judgment_feedback_failed";
 const ANONYMOUS_CONVERSATION_STORAGE_KEY = "safety_nudges_anonymous_conversation_id";
 const CLAUDE_CONVERSATION_STORAGE_KEY = "safety_nudges_claude_conversation_id";
 const TURN_NODE_SELECTOR = "[data-message-author-role]";
-const FIXTURE_SURFACE_META_SELECTOR = 'meta[name="safety-nudges-surface"]';
 
 const state = {
   observer: null,
@@ -34,37 +33,6 @@ const state = {
   extensionRecoveryAttempted: false,
   analysisEnabled: true
 };
-
-function isLocalFixtureHost() {
-  return window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
-}
-
-function getFixtureSurfaceType() {
-  const root = document.documentElement;
-  const dataValue =
-    root && root.dataset && typeof root.dataset.safetyNudgesSurface === "string" ? root.dataset.safetyNudgesSurface : "";
-  const meta = document.querySelector(FIXTURE_SURFACE_META_SELECTOR);
-  const metaValue = meta && typeof meta.content === "string" ? meta.content : "";
-  const surface = (dataValue || metaValue || "chatgpt").trim().toLowerCase();
-  return surface === "claude" ? "claude" : "chatgpt";
-}
-
-function getFixtureConversationId() {
-  const fixtureRoot = document.documentElement;
-  const fixtureConversationId =
-    (fixtureRoot &&
-      fixtureRoot.dataset &&
-      typeof fixtureRoot.dataset.safetyNudgesConversationId === "string" &&
-      fixtureRoot.dataset.safetyNudgesConversationId.trim()) ||
-    (document.querySelector('meta[name="safety-nudges-conversation-id"]') || {}).content ||
-    "";
-  if (fixtureConversationId) {
-    return fixtureConversationId;
-  }
-
-  const pathParts = window.location.pathname.split("/").filter(Boolean);
-  return pathParts.length > 0 ? pathParts.at(-1) || null : null;
-}
 
 function createChatGptSurfaceAdapter() {
   return {
@@ -117,87 +85,6 @@ function createChatGptSurfaceAdapter() {
         const label = (button.getAttribute("aria-label") || button.innerText || "").trim().toLowerCase();
         return label.includes("stop generating") || label === "stop";
       });
-    }
-  };
-}
-
-function createFixtureSurfaceAdapter() {
-  return {
-    id: "fixture",
-    matches() {
-      if (!isLocalFixtureHost()) {
-        return false;
-      }
-
-      if (!window.location.pathname.startsWith("/fixtures/")) {
-        return false;
-      }
-
-      const root = document.documentElement;
-      return Boolean(
-        (root && root.dataset && root.dataset.safetyNudgesFixture === "true") ||
-          document.querySelector('meta[name="safety-nudges-fixture"][content="true"]')
-      );
-    },
-    getConversationContainer() {
-      if (getFixtureSurfaceType() === "claude") {
-        const inputContainer = document.querySelector('[data-chat-input-container="true"]');
-        return (inputContainer && inputContainer.parentElement) || document.querySelector("main");
-      }
-
-      return document.querySelector("main");
-    },
-    getResponseMountNode(responseNode) {
-      if (getFixtureSurfaceType() === "claude") {
-        return responseNode ? responseNode.querySelector(".font-claude-response") || responseNode : responseNode;
-      }
-
-      return responseNode;
-    },
-    getTurnNodes(role) {
-      if (getFixtureSurfaceType() === "claude") {
-        if (role === "user") {
-          return Array.from(document.querySelectorAll('[data-testid="user-message"]'));
-        }
-        if (role === "assistant") {
-          return Array.from(document.querySelectorAll("div[data-is-streaming]"));
-        }
-        return [];
-      }
-
-      return Array.from(document.querySelectorAll(`${TURN_NODE_SELECTOR}[data-message-author-role="${role}"]`));
-    },
-    getTranscriptEntries() {
-      if (getFixtureSurfaceType() === "claude") {
-        return Array.from(document.querySelectorAll('[data-testid="user-message"], div[data-is-streaming]'))
-          .map((node) => ({
-            role: node.matches('[data-testid="user-message"]') ? "user" : "assistant",
-            node
-          }))
-          .filter((entry) => entry.role === "user" || entry.role === "assistant");
-      }
-
-      return Array.from(document.querySelectorAll(TURN_NODE_SELECTOR))
-        .map((node) => ({
-          role: node.getAttribute("data-message-author-role"),
-          node
-        }))
-        .filter((entry) => entry.role === "user" || entry.role === "assistant");
-    },
-    getTurnText(node, role) {
-      if (getFixtureSurfaceType() === "claude" && role === "assistant") {
-        return getClaudeAssistantText(node);
-      }
-
-      return getGenericNodeText(node);
-    },
-    getConversationId() {
-      return getFixtureConversationId();
-    },
-    isGenerationInProgress() {
-      return getFixtureSurfaceType() === "claude"
-        ? Boolean(document.querySelector('div[data-is-streaming="true"]'))
-        : false;
     }
   };
 }
@@ -282,7 +169,7 @@ function createClaudeSurfaceAdapter() {
   };
 }
 
-const SURFACE_ADAPTERS = [createFixtureSurfaceAdapter(), createClaudeSurfaceAdapter(), createChatGptSurfaceAdapter()];
+const SURFACE_ADAPTERS = [createClaudeSurfaceAdapter(), createChatGptSurfaceAdapter()];
 let activeSurfaceAdapter = null;
 
 function getActiveSurfaceAdapter() {
@@ -468,14 +355,6 @@ function getResponseUiFontFallback() {
   const adapter = getActiveSurfaceAdapter();
   if (adapter && adapter.id === "claude") {
     return 'ui-sans-serif, system-ui, sans-serif';
-  }
-
-  if (adapter && adapter.id === "fixture" && getFixtureSurfaceType() === "claude") {
-    return 'ui-sans-serif, system-ui, sans-serif';
-  }
-
-  if (adapter && adapter.id === "fixture") {
-    return '"IBM Plex Sans", "Segoe UI", sans-serif';
   }
 
   return '"SF Pro Text", "Segoe UI", sans-serif';
@@ -1055,7 +934,7 @@ async function requestIssueAnalysis(payload) {
     ok: false,
     error:
       lastError ||
-      "Safety Nudges timed out waiting for the extension worker. The analysis request may not have reached the local endpoint."
+      "Safety Nudges timed out waiting for the extension worker."
   };
 }
 
