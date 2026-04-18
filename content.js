@@ -381,7 +381,13 @@ function applyResponseAnchorTheme(anchor, responseNode) {
     return;
   }
 
-  anchor.style.setProperty("--safety-nudges-font-family", getResponseUiFontFamily(responseNode));
+  const fontFamily = getResponseUiFontFamily(responseNode);
+  anchor.style.setProperty("--safety-nudges-font-family", fontFamily);
+
+  const panel = getResponsePanel(anchor);
+  if (panel instanceof HTMLElement) {
+    panel.style.fontFamily = fontFamily;
+  }
 }
 
 function applyStoredAnalysisConfig(config) {
@@ -944,15 +950,65 @@ function getResponseAnchorByFingerprint(fingerprint) {
   );
 }
 
+function ensureOverlayRoot() {
+  let root = document.getElementById(ROOT_ID);
+  if (root) {
+    return root;
+  }
+
+  root = document.createElement("div");
+  root.id = ROOT_ID;
+  document.body.appendChild(root);
+  return root;
+}
+
+function getResponsePanel(anchor) {
+  if (!anchor) {
+    return null;
+  }
+
+  const fingerprint = anchor.dataset.fingerprint;
+  if (!fingerprint) {
+    return anchor.querySelector(".safety-nudges-response-panel");
+  }
+
+  return document.querySelector(`.safety-nudges-response-panel[data-owner-fingerprint="${fingerprint}"]`);
+}
+
+function mountResponsePanelToOverlay(anchor) {
+  const panel = getResponsePanel(anchor);
+  if (!panel) {
+    return null;
+  }
+
+  const root = ensureOverlayRoot();
+  if (panel.parentElement !== root) {
+    root.appendChild(panel);
+  }
+
+  return panel;
+}
+
+function restoreResponsePanelToAnchor(anchor) {
+  const panel = getResponsePanel(anchor);
+  if (!panel || panel.parentElement === anchor) {
+    return panel;
+  }
+
+  anchor.appendChild(panel);
+  return panel;
+}
+
 function closeAllResponsePanels(exceptFingerprint = null) {
   const anchors = Array.from(document.querySelectorAll(".safety-nudges-response-anchor"));
   for (const anchor of anchors) {
     const shouldStayOpen = exceptFingerprint && anchor.dataset.fingerprint === exceptFingerprint;
-    const panel = anchor.querySelector(".safety-nudges-response-panel");
+    const panel = getResponsePanel(anchor);
     const button = anchor.querySelector(".safety-nudges-response-chip");
     if (panel) {
       panel.hidden = !shouldStayOpen;
       if (!shouldStayOpen) {
+        restoreResponsePanelToAnchor(anchor);
         panel.style.maxHeight = "";
         panel.style.maxWidth = "";
         panel.style.left = "";
@@ -1198,7 +1254,7 @@ function updateResponsePanelPlacement(anchor) {
     return;
   }
 
-  const panel = anchor.querySelector(".safety-nudges-response-panel");
+  const panel = getResponsePanel(anchor);
   if (!panel || panel.hidden) {
     return;
   }
@@ -1238,20 +1294,16 @@ function updateResponsePanelPlacement(anchor) {
   const defaultLeft = anchorRect.right - constrainedPanelWidth;
   const maxLeft = Math.max(safeLeft, safeRight - constrainedPanelWidth);
   const clampedLeft = Math.min(Math.max(defaultLeft, safeLeft), maxLeft);
-  panel.style.left = `${Math.round(clampedLeft - anchorRect.left)}px`;
-  panel.style.right = "auto";
+  panel.style.left = `${Math.round(clampedLeft)}px`;
   panel.style.maxHeight = `${Math.max(0, Math.floor(maxHeight))}px`;
   if (placement === "below") {
-    panel.style.top = `${anchor.offsetHeight + gap}px`;
-    panel.style.bottom = "auto";
+    panel.style.top = `${Math.round(anchorRect.bottom + gap)}px`;
     return;
   }
 
   const cappedPanelHeight = Math.min(panelRect.height, maxHeight);
-  const minTopOffset = safeTop - anchorRect.top;
-  const preferredTopOffset = -(cappedPanelHeight + gap);
-  panel.style.top = `${Math.round(Math.max(minTopOffset, preferredTopOffset))}px`;
-  panel.style.bottom = "auto";
+  const preferredTop = anchorRect.top - cappedPanelHeight - gap;
+  panel.style.top = `${Math.round(Math.max(safeTop, preferredTop))}px`;
 }
 
 function ensureExpandedFeedbackVisible(anchor) {
@@ -1259,10 +1311,10 @@ function ensureExpandedFeedbackVisible(anchor) {
     return;
   }
 
-  const panel = anchor.querySelector(".safety-nudges-response-panel");
-  const feedbackSection = anchor.querySelector(".safety-nudges-feedback-section");
-  const feedbackRow = anchor.querySelector(".safety-nudges-feedback-row");
-  const commentWrap = anchor.querySelector(".safety-nudges-feedback-comment");
+  const panel = getResponsePanel(anchor);
+  const feedbackSection = panel ? panel.querySelector(".safety-nudges-feedback-section") : null;
+  const feedbackRow = panel ? panel.querySelector(".safety-nudges-feedback-row") : null;
+  const commentWrap = panel ? panel.querySelector(".safety-nudges-feedback-comment") : null;
   if (!panel || panel.hidden || !feedbackSection || !commentWrap || commentWrap.hidden) {
     return;
   }
@@ -1369,7 +1421,7 @@ function hideFloatingTooltip() {
 function refreshOpenResponsePanels() {
   const anchors = Array.from(document.querySelectorAll(".safety-nudges-response-anchor"));
   for (const anchor of anchors) {
-    const panel = anchor.querySelector(".safety-nudges-response-panel");
+    const panel = getResponsePanel(anchor);
     if (panel && !panel.hidden) {
       updateResponsePanelPlacement(anchor);
     }
@@ -1382,7 +1434,7 @@ function toggleResponsePanel(fingerprint) {
     return;
   }
 
-  const panel = anchor.querySelector(".safety-nudges-response-panel");
+  const panel = getResponsePanel(anchor);
   const button = anchor.querySelector(".safety-nudges-response-chip");
   if (!panel || !button) {
     return;
@@ -1391,6 +1443,7 @@ function toggleResponsePanel(fingerprint) {
   const nextOpen = panel.hidden;
   closeAllResponsePanels(nextOpen ? fingerprint : null);
   if (nextOpen) {
+    mountResponsePanelToOverlay(anchor);
     updateResponsePanelPlacement(anchor);
   }
 }
@@ -1421,7 +1474,7 @@ function ensureResponseAnchor(responseNode, fingerprint) {
       '<span class="safety-nudges-spinner" aria-hidden="true"></span>',
       '<span class="safety-nudges-chip-text">Safety Nudges</span>',
       "</button>",
-      '<div class="safety-nudges-response-panel" hidden>',
+      `<div class="safety-nudges-response-panel" data-owner-fingerprint="${fingerprint}" hidden>`,
       '<div class="safety-nudges-panel-header">',
       '<p class="safety-nudges-panel-title">Safety Nudges</p>',
       '<button type="button" class="safety-nudges-panel-close" aria-label="Close response issue details">&times;</button>',
@@ -2266,17 +2319,18 @@ function renderIssueList(listNode, result) {
 }
 
 function renderFeedbackSection(anchor, feedbackState, analysisState = null) {
-  const feedbackSection = anchor.querySelector(".safety-nudges-feedback-section");
-  const options = Array.from(anchor.querySelectorAll(".safety-nudges-feedback-option"));
-  const commentWrap = anchor.querySelector(".safety-nudges-feedback-comment");
-  const textarea = anchor.querySelector(".safety-nudges-feedback-textarea");
-  const consent = anchor.querySelector(".safety-nudges-feedback-consent");
-  const consentCheckbox = anchor.querySelector(".safety-nudges-feedback-consent-checkbox");
-  const consentNote = anchor.querySelector(".safety-nudges-feedback-consent-note");
-  const status = anchor.querySelector(".safety-nudges-feedback-status");
-  const actions = anchor.querySelector(".safety-nudges-feedback-actions");
-  const submitButton = anchor.querySelector(".safety-nudges-feedback-submit");
-  const cancelButton = anchor.querySelector(".safety-nudges-feedback-cancel");
+  const panel = getResponsePanel(anchor);
+  const feedbackSection = panel ? panel.querySelector(".safety-nudges-feedback-section") : null;
+  const options = panel ? Array.from(panel.querySelectorAll(".safety-nudges-feedback-option")) : [];
+  const commentWrap = panel ? panel.querySelector(".safety-nudges-feedback-comment") : null;
+  const textarea = panel ? panel.querySelector(".safety-nudges-feedback-textarea") : null;
+  const consent = panel ? panel.querySelector(".safety-nudges-feedback-consent") : null;
+  const consentCheckbox = panel ? panel.querySelector(".safety-nudges-feedback-consent-checkbox") : null;
+  const consentNote = panel ? panel.querySelector(".safety-nudges-feedback-consent-note") : null;
+  const status = panel ? panel.querySelector(".safety-nudges-feedback-status") : null;
+  const actions = panel ? panel.querySelector(".safety-nudges-feedback-actions") : null;
+  const submitButton = panel ? panel.querySelector(".safety-nudges-feedback-submit") : null;
+  const cancelButton = panel ? panel.querySelector(".safety-nudges-feedback-cancel") : null;
   const selectedValue = feedbackState && feedbackState.selected ? feedbackState.selected : "";
   const consentChecked = Boolean(feedbackState && feedbackState.consentChecked);
   const isSubmitted = feedbackState && feedbackState.stage === "submitted";
@@ -2365,9 +2419,9 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
   const chip = anchor.querySelector(".safety-nudges-response-chip");
   const chipText = anchor.querySelector(".safety-nudges-chip-text");
   const spinner = anchor.querySelector(".safety-nudges-spinner");
-  const panel = anchor.querySelector(".safety-nudges-response-panel");
-  const summary = anchor.querySelector(".safety-nudges-panel-summary");
-  const issueList = anchor.querySelector(".safety-nudges-issue-list");
+  const panel = getResponsePanel(anchor);
+  const summary = panel ? panel.querySelector(".safety-nudges-panel-summary") : null;
+  const issueList = panel ? panel.querySelector(".safety-nudges-issue-list") : null;
 
   if (!chip || !chipText || !spinner || !panel || !summary || !issueList) {
     return;
