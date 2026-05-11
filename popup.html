@@ -307,9 +307,8 @@
       <div id="onboarding-screen" class="screen" hidden>
         <div class="card">
           <h2>Choose setup</h2>
-          <p class="muted">Use a Safety Nudges activation code we provide, or use your own OpenRouter key.</p>
+          <p class="muted">Use the Safety Nudges activation code from your onboarding email.</p>
           <button id="choose-basic-setup" class="choice-button" type="button">Use activation code</button>
-          <button id="choose-advanced-setup" class="choice-button secondary" type="button">Advanced setup</button>
         </div>
         <button id="open-data-use-onboarding" class="text-link" type="button">Learn about data use</button>
       </div>
@@ -344,16 +343,16 @@
                 <input id="provider-complementary" type="radio" name="provider-selection" value="complementary">
                 <span class="provider-option-body">
                   <strong>Complementary provider</strong>
-                  <span id="complementary-provider-description" class="tiny">Use openai/gpt-5-mini on claude.ai and anthropic/claude-sonnet-4.6 on chatgpt.com.</span>
+                  <span id="complementary-provider-description" class="tiny">Use gpt-5-mini on claude.ai and claude-sonnet-4-6 on chatgpt.com.</span>
                 </span>
               </label>
-              <label class="provider-option" for="provider-openrouter">
-                <input id="provider-openrouter" type="radio" name="provider-selection" value="openrouter">
+              <label class="provider-option" for="provider-direct">
+                <input id="provider-direct" type="radio" name="provider-selection" value="direct">
                 <span class="provider-option-body">
                   <strong>Choose your model</strong>
                   <span class="tiny">Use one model everywhere instead of the complementary defaults.</span>
-                  <div id="openrouter-model-field" class="inline-select">
-                    <select id="openrouter-model"></select>
+                  <div id="direct-model-field" class="inline-select">
+                    <select id="direct-model"></select>
                   </div>
                 </span>
               </label>
@@ -407,14 +406,6 @@
         </div>
 
         <div class="card stack">
-          <div class="field">
-            <label for="openrouter-key">OpenRouter API key</label>
-            <input id="openrouter-key" type="password" placeholder="sk-or-...">
-          </div>
-          <p class="tiny">OpenRouter keys are kept only for the current browser session and must be re-entered after Chrome restarts.</p>
-        </div>
-
-        <div class="card stack">
           <h2>Recent activity</h2>
           <div id="activity-log">Loading activity...</div>
         </div>
@@ -433,7 +424,7 @@
           <button id="close-data-use" class="back-button" type="button">Back</button>
         </div>
 
-        <p id="data-use-description" class="data-use-copy">When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it. If you are in a pilot study, a pseudonymous ID may also be attached to your feedback.</p>
+        <p id="data-use-description" class="data-use-copy">When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenAI or Anthropic for analysis. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it. If you are in a pilot study, a pseudonymous ID may also be attached to your feedback.</p>
       </div>
     </div>
     <script src="tagging_prompt.js"></script>

@@ -17,13 +17,11 @@ Supported sites:
 
 ## Analysis Routes
 
-Safety Nudges supports two hosted paths:
+Safety Nudges supports one hosted path in this extension build:
 - managed access using a Safety Nudges activation code
-- manual OpenRouter setup using your own OpenRouter API key
 
 Managed access exchanges the activation email and code once for a scoped managed session. The raw activation code is not kept locally after exchange.
-
-Manual OpenRouter API keys are session-only and must be re-entered after Chrome restarts.
+Managed analysis requests are relayed by Safety Nudges infrastructure to direct OpenAI or Anthropic provider accounts.
 
 ## Data Behavior
 

@@ -4,7 +4,7 @@ This privacy policy applies to the Safety Nudges Chrome extension.
 
 ## TL;DR
 
-To analyze chatbot responses, Safety Nudges sends the current exchange plus a bounded window of recent conversation history to remote services: Safety Nudges managed infrastructure and OpenRouter.
+To analyze chatbot responses, Safety Nudges sends the current exchange plus a bounded window of recent conversation history to remote services: Safety Nudges managed infrastructure and direct OpenAI or Anthropic provider accounts.
 
 Safety Nudges does not store routine-analysis chat content in Safety Nudges-hosted systems just because analysis runs. We store chat-related data in Safety Nudges-hosted systems only if you explicitly submit feedback and agree to share it with us.
 
@@ -17,7 +17,7 @@ The extension starts paused when first installed. When Safety Nudges is enabled,
 - the current supported page URL
 - a conversation identifier derived from the page when available
 
-Analysis traffic goes through Safety Nudges managed infrastructure and then to OpenRouter.
+Analysis traffic goes through Safety Nudges managed infrastructure and then to OpenAI or Anthropic.
 
 ## What Safety Nudges Stores
 
@@ -41,7 +41,6 @@ Safety Nudges does not store routine-analysis chat history in its database merel
 Safety Nudges also does not persist:
 - the raw activation email
 - the raw activation code
-- manual OpenRouter API keys across browser restarts
 
 ## Local Browser Storage
 
@@ -68,7 +67,7 @@ Submitted feedback may be manually reviewed by researchers or operators.
 
 Safety Nudges uses:
 - Safety Nudges managed infrastructure for request routing and managed access
-- OpenRouter for hosted model inference
+- OpenAI and Anthropic for hosted model inference
 - Supabase for backend infrastructure and feedback storage
 
 ## Your Choices
@@ -81,7 +80,7 @@ Safety Nudges uses:
 
 ## Sensitive Information
 
-Do not use Safety Nudges on chats or feedback comments containing especially sensitive personal, medical, legal, financial, account, or other confidential information unless you are comfortable with that information being processed by Safety Nudges and OpenRouter.
+Do not use Safety Nudges on chats or feedback comments containing especially sensitive personal, medical, legal, financial, account, or other confidential information unless you are comfortable with that information being processed by Safety Nudges and OpenAI or Anthropic.
 
 ## Retention
 
@@ -98,8 +97,6 @@ Managed-session lifecycle:
 - refresh token lifetime: 30 days
 - token rotation occurs on refresh
 - re-onboarding is required after expiry or revocation
-
-Manual OpenRouter API keys are session-only and must be re-entered after Chrome restarts.
 
 ## Deletion Requests
 

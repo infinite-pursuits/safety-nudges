@@ -12,7 +12,7 @@ const DEFAULT_API_CONFIG = {
   enabled: false,
   analysisSensitivity: "standard",
   identifySpans: true,
-  setupMode: "advanced",
+  setupMode: "basic",
   onboardingComplete: false,
   managedEmail: "",
   managedAccessKey: "",
@@ -25,15 +25,13 @@ const DEFAULT_API_CONFIG = {
   managedFeedbackParticipantId: "",
   managedProviderProjectId: "",
   managedModelPolicy: null,
-  openrouterApiKey: "",
-  openrouterModel: ""
+  directModel: "",
+  endpoint: ""
 };
 const SUPABASE_URL = "https://bjokhkmomdogymmmnpdo.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_KdngS39ZCxvJ854R0zy3xA_0LKy8nj5";
+// Historical deployed function name. New extension builds call only the direct-provider actions.
 const MANAGED_ACCESS_FUNCTION_NAME = "openrouter-alpha-user";
-const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_HTTP_REFERER = "https://github.com/jtbwedgwood/safety-nudges";
-const OPENROUTER_X_TITLE = "Safety Nudges";
 const ANALYSIS_REQUEST_SCHEMA_VERSION = "1.1.0";
 const ANALYSIS_HISTORY_MAX_MESSAGES = 12;
 const ANALYSIS_HISTORY_MAX_CHARS_PER_MESSAGE = 4000;
@@ -47,25 +45,21 @@ let analysisRequestSequence = 0;
 
 const PERSISTED_ANALYSIS_API_KEY = "analysisApi";
 const SESSION_ANALYSIS_SECRETS_KEY = "analysisApiSecrets";
-const STATIC_OPENROUTER_MODEL_POLICY = {
-  catalog_version: "2026-03-31",
-  latest_sonnet_model_id: "anthropic/claude-sonnet-4.6",
+const STATIC_DIRECT_MODEL_POLICY = {
+  catalog_version: "2026-05-08-direct",
+  relay_provider: "direct",
+  latest_sonnet_model_id: "claude-sonnet-4-6",
   default_models_by_surface: {
-    "claude.ai": "openai/gpt-5-mini",
-    "chatgpt.com": "anthropic/claude-sonnet-4.6",
-    "chat.openai.com": "anthropic/claude-sonnet-4.6"
+    "claude.ai": "gpt-5-mini",
+    "chatgpt.com": "claude-sonnet-4-6",
+    "chat.openai.com": "claude-sonnet-4-6"
   },
   curated_models: [
-    { id: "openai/gpt-5-mini", label: "OpenAI: GPT-5 Mini" },
-    { id: "anthropic/claude-sonnet-4.6", label: "Anthropic: Claude Sonnet 4.6" },
-    { id: "google/gemini-2.5-flash", label: "Google: Gemini 2.5 Flash" },
-    { id: "google/gemini-2.5-pro", label: "Google: Gemini 2.5 Pro" },
-    { id: "meta-llama/llama-4-maverick", label: "Meta: Llama 4 Maverick" },
-    { id: "mistralai/mistral-medium-3.1", label: "Mistral: Medium 3.1" },
-    { id: "qwen/qwen3-coder", label: "Qwen: Qwen3 Coder" },
-    { id: "qwen/qwen3-235b-a22b", label: "Qwen: Qwen3 235B A22B" }
+    { id: "gpt-5-mini", label: "OpenAI: GPT-5 Mini" },
+    { id: "claude-sonnet-4-6", label: "Anthropic: Claude Sonnet 4.6" }
   ]
 };
+const DIRECT_MODEL_IDS = new Set(STATIC_DIRECT_MODEL_POLICY.curated_models.map((entry) => entry.id));
 
 const runtimeState = {
   activityLog: [],
@@ -227,14 +221,11 @@ function applyManagedSessionToConfig(config, response) {
     provider: providerSelection,
     setupMode: "basic",
     onboardingComplete: true,
-    openrouterModel:
-      response && response.default_model
-        ? response.default_model
-        : config.openrouterModel || DEFAULT_API_CONFIG.openrouterModel,
+    directModel: response && response.default_model ? response.default_model : config.directModel || DEFAULT_API_CONFIG.directModel,
     managedModelPolicy:
       response && response.managed_model_policy && typeof response.managed_model_policy === "object"
         ? response.managed_model_policy
-        : config.managedModelPolicy || STATIC_OPENROUTER_MODEL_POLICY,
+        : config.managedModelPolicy || STATIC_DIRECT_MODEL_POLICY,
     managedSessionToken:
       managedSession && typeof managedSession.session_token === "string" ? managedSession.session_token : "",
     managedRefreshToken:
@@ -253,8 +244,14 @@ function applyManagedSessionToConfig(config, response) {
 }
 
 function extractManagedSessionMetadata(config) {
+  const policy =
+    config && config.managedModelPolicy && typeof config.managedModelPolicy === "object"
+      ? config.managedModelPolicy
+      : {};
+  const relayProvider = typeof policy.relay_provider === "string" ? policy.relay_provider : "direct";
   return {
     allocationId: config.managedAllocationId || null,
+    relayProvider,
     pilotFeedbackEnabled: Boolean(config.managedPilotFeedbackEnabled),
     feedbackParticipantId: config.managedFeedbackParticipantId || null,
     providerProjectId: config.managedProviderProjectId || null,
@@ -464,6 +461,15 @@ function broadcastApiConfigUpdate(config) {
   });
 }
 
+function sanitizeDirectModelPolicy(policy) {
+  if (!policy || typeof policy !== "object" || policy.relay_provider !== "direct") {
+    return STATIC_DIRECT_MODEL_POLICY;
+  }
+  const curatedModels = Array.isArray(policy.curated_models) ? policy.curated_models : [];
+  const hasOnlyDirectModels = curatedModels.every((entry) => entry && DIRECT_MODEL_IDS.has(entry.id));
+  return hasOnlyDirectModels ? policy : STATIC_DIRECT_MODEL_POLICY;
+}
+
 function getStoredApiConfig() {
   return new Promise((resolve) => {
     chrome.storage.local.get([PERSISTED_ANALYSIS_API_KEY], (stored) => {
@@ -473,18 +479,8 @@ function getStoredApiConfig() {
       };
       merged.managedEmail = "";
       merged.managedAccessKey = "";
-      chrome.storage.session.get([SESSION_ANALYSIS_SECRETS_KEY], (sessionStored) => {
-        const sessionSecrets = sessionStored[SESSION_ANALYSIS_SECRETS_KEY] || {};
-        merged.openrouterApiKey =
-          typeof sessionSecrets.openrouterApiKey === "string" ? sessionSecrets.openrouterApiKey.trim() : "";
-
-        if (!merged.onboardingComplete) {
-          const hasLegacySetup = Boolean(merged.openrouterApiKey);
-          if (hasLegacySetup) {
-            merged.onboardingComplete = true;
-            merged.setupMode = merged.setupMode || "advanced";
-          }
-        }
+      merged.managedModelPolicy = sanitizeDirectModelPolicy(merged.managedModelPolicy);
+      chrome.storage.session.get([SESSION_ANALYSIS_SECRETS_KEY], () => {
         resolve(merged);
       });
     });
@@ -492,9 +488,8 @@ function getStoredApiConfig() {
 }
 
 function getSessionSecretConfig(config) {
-  return {
-    openrouterApiKey: typeof config.openrouterApiKey === "string" ? config.openrouterApiKey.trim() : ""
-  };
+  void config;
+  return {};
 }
 
 function getPersistedApiConfig(config) {
@@ -514,8 +509,8 @@ function getPersistedApiConfig(config) {
     managedFeedbackParticipantId: config.managedFeedbackParticipantId,
     managedProviderProjectId: config.managedProviderProjectId,
     managedModelPolicy: config.managedModelPolicy,
-    openrouterModel: config.openrouterModel,
-    openrouterApiKey: ""
+    directModel: config.directModel,
+    endpoint: config.endpoint
   };
 }
 
@@ -574,13 +569,16 @@ function buildApiConfig(config, existing = DEFAULT_API_CONFIG) {
         : existing.managedProviderProjectId || DEFAULT_API_CONFIG.managedProviderProjectId,
     managedModelPolicy:
       config.managedModelPolicy && typeof config.managedModelPolicy === "object"
-        ? config.managedModelPolicy
-        : existing.managedModelPolicy || DEFAULT_API_CONFIG.managedModelPolicy,
-    openrouterApiKey:
-      typeof config.openrouterApiKey === "string" && config.openrouterApiKey.trim()
-        ? config.openrouterApiKey.trim()
-        : existing.openrouterApiKey || DEFAULT_API_CONFIG.openrouterApiKey,
-    openrouterModel: config.openrouterModel || existing.openrouterModel || DEFAULT_API_CONFIG.openrouterModel
+        ? sanitizeDirectModelPolicy(config.managedModelPolicy)
+        : sanitizeDirectModelPolicy(existing.managedModelPolicy || DEFAULT_API_CONFIG.managedModelPolicy),
+    directModel:
+      config.directModel ||
+      existing.directModel ||
+      DEFAULT_API_CONFIG.directModel,
+    endpoint:
+      typeof config.endpoint === "string" && config.endpoint.trim()
+        ? config.endpoint.trim()
+        : existing.endpoint || DEFAULT_API_CONFIG.endpoint
   };
 }
 
@@ -615,8 +613,7 @@ function setStoredApiConfig(config) {
                 hasManagedSessionToken: Boolean(nextConfig.managedSessionToken),
                 hasManagedRefreshToken: Boolean(nextConfig.managedRefreshToken),
                 managedAllocationId: nextConfig.managedAllocationId || null,
-                openrouterModel: nextConfig.openrouterModel,
-                hasOpenRouterKey: Boolean(nextConfig.openrouterApiKey)
+                directModel: nextConfig.directModel
               });
               resolve();
             }
@@ -761,11 +758,20 @@ function buildAnalysisRequest(payload) {
 }
 
 function normalizeProviderName(value) {
-  return value === "openrouter" ? value : "openrouter";
+  if (value === "local") {
+    return "local";
+  }
+  return "direct";
 }
 
 function normalizeProviderSelection(value) {
-  return value === "complementary" ? value : "openrouter";
+  if (value === "local") {
+    return "local";
+  }
+  if (value === "direct") {
+    return "direct";
+  }
+  return "complementary";
 }
 
 function normalizeSetupMode(value) {
@@ -847,6 +853,20 @@ function classifyConnectionFailure(errorMessage) {
     );
   }
 
+  if (
+    normalized.includes("openai_api_key") ||
+    normalized.includes("anthropic_api_key") ||
+    normalized.includes("provider credential") ||
+    normalized.includes("provider credentials")
+  ) {
+    return buildFriendlyConnectionResult(
+      false,
+      "Connection test failed. Safety Nudges managed infrastructure is missing a provider credential. This is not something to add in the extension popup.",
+      null,
+      "managed_provider_credentials_missing"
+    );
+  }
+
   if (normalized.includes("missing")) {
     return buildFriendlyConnectionResult(
       false,
@@ -883,27 +903,28 @@ function classifyConnectionFailure(errorMessage) {
 }
 
 async function testManagedActivationConnection(config) {
-  const managedResult = await callManagedAccessWithSession("managed_openrouter_test", config, {}, {
+  const managedResult = await callManagedAccessWithSession("managed_provider_test", config, {}, {
     allowActivationExchange: true
   });
   const hydratedConfig = managedResult.config;
   const testResult = managedResult.response;
-  const rawText = extractOpenRouterTextResponse(testResult.raw_response || {});
+  const rawText = extractProviderTextResponse(testResult.raw_response || {});
   try {
     JSON.parse(rawText);
   } catch (error) {
-    throw new Error(`Managed OpenRouter returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
+    throw new Error(`Managed provider returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
   }
 
   const result = buildFriendlyConnectionResult(
     true,
-    "Connection test succeeded. Managed OpenRouter access is ready.",
+    "Connection test succeeded. Managed Safety Nudges access is ready.",
     {
       provider: hydratedConfig.provider,
-      model: hydratedConfig.openrouterModel,
+      relayProvider: "direct",
+      model: hydratedConfig.directModel,
       ...extractManagedSessionMetadata(hydratedConfig)
     },
-    "managed_openrouter_success"
+    "managed_provider_success"
   );
   logEvent("info", "Managed access session verified via Supabase Edge Function", result.details);
   return result;
@@ -936,11 +957,32 @@ function buildOpenAiMessages(payload) {
   );
 }
 
-function buildOpenRouterMessages(payload) {
+function buildManagedMessages(payload) {
   return buildOpenAiMessages(payload);
 }
 
-function extractOpenRouterTextResponse(response) {
+function extractProviderTextResponse(response) {
+  if (response && typeof response.output_text === "string" && response.output_text.trim()) {
+    return response.output_text.trim();
+  }
+
+  const output = Array.isArray(response && response.output) ? response.output : [];
+  for (const item of output) {
+    const content = item && Array.isArray(item.content) ? item.content : [];
+    for (const block of content) {
+      if (block && typeof block.text === "string" && block.text.trim()) {
+        return block.text.trim();
+      }
+    }
+  }
+
+  const anthropicContent = Array.isArray(response && response.content) ? response.content : [];
+  for (const block of anthropicContent) {
+    if (block && typeof block.text === "string" && block.text.trim()) {
+      return block.text.trim();
+    }
+  }
+
   const choices = Array.isArray(response && response.choices) ? response.choices : [];
   for (const choice of choices) {
     const message = choice && choice.message && typeof choice.message === "object" ? choice.message : null;
@@ -959,7 +1001,7 @@ function extractOpenRouterTextResponse(response) {
     }
   }
 
-  throw new Error("OpenRouter response did not contain output text.");
+  throw new Error("Provider response did not contain output text.");
 }
 
 function createTestPayload() {
@@ -1234,164 +1276,97 @@ function normalizeAnalysisResponse(payload, requestPayload = null) {
   };
 }
 
-function resolveOpenRouterModel(config, payload = null) {
+function resolveDirectModel(config, payload = null) {
   const providerSelection = normalizeProviderSelection(config && config.provider ? config.provider : DEFAULT_API_CONFIG.provider);
   if (
-    providerSelection === "openrouter" &&
+    providerSelection === "direct" &&
     config &&
-    typeof config.openrouterModel === "string" &&
-    config.openrouterModel.trim()
+    typeof config.directModel === "string" &&
+    config.directModel.trim()
   ) {
-    return config.openrouterModel.trim();
+    return config.directModel.trim();
   }
 
   const hostname = getHostnameFromPageUrl(payload && payload.pageUrl ? payload.pageUrl : "");
   const policy =
     config && config.managedModelPolicy && typeof config.managedModelPolicy === "object"
       ? config.managedModelPolicy
-      : STATIC_OPENROUTER_MODEL_POLICY;
+      : STATIC_DIRECT_MODEL_POLICY;
   const defaults = policy && typeof policy.default_models_by_surface === "object" ? policy.default_models_by_surface : {};
-  return defaults[hostname] || "openai/gpt-5-mini";
+  return defaults[hostname] || "gpt-5-mini";
 }
 
-async function callOpenRouterAnalysis(payload, config, trace = null) {
-  if (!config.openrouterApiKey) {
-    throw new Error("OpenRouter API key is missing. Add it in the extension popup.");
+async function callLocalAnalysis(payload, config, trace = null) {
+  if (!config.endpoint) {
+    throw new Error("Local analyzer endpoint is missing.");
   }
 
+  const startedAtMs = nowMs();
   const requestBody = {
-    model: resolveOpenRouterModel(config, payload),
-    messages: buildOpenRouterMessages(payload),
-    max_tokens: resolveOpenRouterModel(config, payload) === "openai/gpt-5-mini" ? 1200 : 700,
-    response_format: {
-      type: "json_object"
-    },
-    reasoning: {
-      effort: "minimal"
-    }
+    ...payload,
+    conversation_id: payload.conversationId || null,
+    prompt: payload.prompt || "",
+    response: payload.response || "",
+    page_url: payload.pageUrl || "",
+    captured_at: payload.capturedAt || null
   };
 
-  const startedAtMs = nowMs();
-  logEvent("info", "Sending OpenRouter analysis request", {
+  logEvent("info", "Sending local analyzer request", {
     requestId: trace ? trace.requestId : null,
-    model: requestBody.model,
+    endpoint: config.endpoint,
     conversationId: payload.conversationId || null
   });
 
-  const response = await fetchWithTimeout(OPENROUTER_CHAT_COMPLETIONS_URL, {
+  const response = await fetchWithTimeout(config.endpoint, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.openrouterApiKey}`,
-      "HTTP-Referer": OPENROUTER_HTTP_REFERER,
-      "X-Title": OPENROUTER_X_TITLE
+      "Content-Type": "application/json"
     },
     body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenRouter API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+    throw new Error(`Local analyzer returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
   }
 
   const rawResponse = await response.json();
-  const rawText = extractOpenRouterTextResponse(rawResponse);
-  logEvent("info", "Received OpenRouter analysis response", {
+  logEvent("info", "Received local analyzer response", {
     requestId: trace ? trace.requestId : null,
-    model: requestBody.model,
-    httpStatus: response.status,
-    latencyMs: elapsedMs(startedAtMs),
-    responseChars: rawText.length
+    latencyMs: elapsedMs(startedAtMs)
   });
-
-  let parsed;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch (error) {
-    throw new Error(`OpenRouter returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
-  }
-
-  logEvent("info", "OpenRouter analysis raw payload", {
-    requestId: trace ? trace.requestId : null,
-    model: requestBody.model,
-    rawPayloadJson: safeJsonStringify(parsed),
-    rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
-  });
-
-  const normalized = normalizeAnalysisResponse(parsed, payload);
-  if (config.identifySpans !== false && normalized.issueDetected && countEvidenceSpans(normalized.issues) === 0) {
-    logEvent("warn", "OpenRouter analysis returned issues without evidence spans", {
-      requestId: trace ? trace.requestId : null,
-      model: requestBody.model,
-      source: normalized.source,
-      rawPayloadJson: safeJsonStringify(parsed),
-      rawIssueSpanSummary: summarizeRawIssueSpans(parsed)
-    });
-  }
-  return normalized;
+  return normalizeAnalysisResponse(rawResponse, payload);
 }
 
-async function testOpenRouterConnection(config) {
-  if (!config.openrouterApiKey) {
-    throw new Error("OpenRouter API key is missing. Add it in the extension popup.");
+async function testLocalConnection(config) {
+  if (!config.endpoint) {
+    throw new Error("Local analyzer endpoint is missing.");
   }
 
-  const model = resolveOpenRouterModel(config, createTestPayload());
-  const requestBody = {
-    model,
-    messages: [
-      { role: "system", content: "Reply with JSON only." },
-      { role: "user", content: 'Return exactly {"ok":true}' }
-    ],
-    max_tokens: model === "openai/gpt-5-mini" ? 200 : 120,
-    response_format: {
-      type: "json_object"
-    },
-    reasoning: {
-      effort: "minimal"
-    }
-  };
-
-  const startedAtMs = nowMs();
-  logEvent("info", "Sending OpenRouter connection test", {
-    model: requestBody.model
-  });
-
-  const response = await fetchWithTimeout(OPENROUTER_CHAT_COMPLETIONS_URL, {
+  const response = await fetchWithTimeout(config.endpoint, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.openrouterApiKey}`,
-      "HTTP-Referer": OPENROUTER_HTTP_REFERER,
-      "X-Title": OPENROUTER_X_TITLE
+      "Content-Type": "application/json"
     },
-    body: JSON.stringify(requestBody)
+    body: JSON.stringify({
+      conversation_id: "test-connection",
+      prompt: "This is a connection test prompt.",
+      response: "This is a connection test response."
+    })
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenRouter API returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+    throw new Error(`Local analyzer returned HTTP ${response.status}: ${errorText.slice(0, 300)}`);
   }
-
-  const rawResponse = await response.json();
-  const rawText = extractOpenRouterTextResponse(rawResponse);
-  try {
-    JSON.parse(rawText);
-  } catch (error) {
-    throw new Error(`OpenRouter returned non-JSON test payload: ${error instanceof Error ? error.message : "parse error"}`);
-  }
-
-  const result = {
-    provider: "openrouter",
-    message: `OpenRouter responded successfully with model ${requestBody.model}.`,
+  await response.json();
+  return {
+    provider: "local",
+    message: "Local analyzer responded successfully.",
     details: {
-      model: requestBody.model,
-      latencyMs: elapsedMs(startedAtMs),
-      responseChars: rawText.length
+      endpoint: config.endpoint
     }
   };
-  logEvent("info", "OpenRouter connection test succeeded", result.details);
-  return result;
 }
 
 async function testProviderConnection(configOverride) {
@@ -1450,13 +1425,11 @@ async function analyzeLatestTurn(payload, trace = null) {
       }
     };
     if (setupMode === "basic") {
-      if (provider !== "openrouter") {
-        throw new Error("Managed activation-code mode currently supports OpenRouter only.");
-      }
       const requestBody = {
-        model: resolveOpenRouterModel(config, analysisPayload),
-        messages: buildOpenRouterMessages(analysisPayload),
-        max_tokens: resolveOpenRouterModel(config, analysisPayload) === "openai/gpt-5-mini" ? 1200 : 700,
+        model: resolveDirectModel(config, analysisPayload),
+        messages: buildManagedMessages(analysisPayload),
+        max_tokens: resolveDirectModel(config, analysisPayload) === "gpt-5-mini" ? 1200 : 700,
+        max_output_tokens: resolveDirectModel(config, analysisPayload) === "gpt-5-mini" ? 1200 : 700,
         response_format: {
           type: "json_object"
         },
@@ -1466,20 +1439,22 @@ async function analyzeLatestTurn(payload, trace = null) {
         surface_host: getHostnameFromPageUrl(payload && payload.pageUrl ? payload.pageUrl : ""),
         analysis_policy: analysisPayload.analysisPolicy
       };
-      logEvent("info", "Sending managed OpenRouter analysis relay request", {
+      logEvent("info", "Sending managed provider analysis relay request", {
         requestId: trace ? trace.requestId : null,
+        relayProvider: "direct",
         model: requestBody.model,
         conversationId: payload.conversationId || null,
         ...extractManagedSessionMetadata(config)
       });
-      const managedResult = await callManagedAccessWithSession("managed_openrouter_analyze", config, {
+      const managedResult = await callManagedAccessWithSession("managed_provider_analyze", config, {
         analysis_payload: requestBody
       });
       const relayResponse = managedResult.response;
       const rawResponse = relayResponse.raw_response || {};
-      const rawText = extractOpenRouterTextResponse(rawResponse);
-      logEvent("info", "Received managed OpenRouter analysis response", {
+      const rawText = extractProviderTextResponse(rawResponse);
+      logEvent("info", "Received managed provider analysis response", {
         requestId: trace ? trace.requestId : null,
+        relayProvider: "direct",
         model: requestBody.model,
         responseChars: rawText.length
       });
@@ -1487,7 +1462,7 @@ async function analyzeLatestTurn(payload, trace = null) {
       try {
         parsed = JSON.parse(rawText);
       } catch (error) {
-        throw new Error(`Managed OpenRouter returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
+        throw new Error(`Managed provider returned non-JSON analysis payload: ${error instanceof Error ? error.message : "parse error"}`);
       }
       result = normalizeAnalysisResponse(parsed, analysisPayload);
     } else {
@@ -1536,17 +1511,26 @@ async function analyzeLatestTurn(payload, trace = null) {
 }
 
 const PROVIDER_ADAPTERS = {
-  openrouter: {
-    id: "openrouter",
-    label: "OpenRouter",
-    settingsSections: ["openrouter"],
-    analyze: callOpenRouterAnalysis,
-    testConnection: testOpenRouterConnection
+  local: {
+    id: "local",
+    label: "Local analyzer",
+    settingsSections: [],
+    analyze: callLocalAnalysis,
+    testConnection: testLocalConnection
+  },
+  direct: {
+    id: "direct",
+    label: "Safety Nudges direct providers",
+    settingsSections: [],
+    analyze: async () => {
+      throw new Error("Direct provider analysis requires managed activation-code setup.");
+    },
+    testConnection: testManagedActivationConnection
   }
 };
 
 function getProviderAdapter(provider) {
-  return PROVIDER_ADAPTERS[normalizeProviderName(provider)] || PROVIDER_ADAPTERS.openrouter;
+  return PROVIDER_ADAPTERS[normalizeProviderName(provider)] || PROVIDER_ADAPTERS.direct;
 }
 
 function getProviderDefinitions() {
@@ -1557,9 +1541,9 @@ function getProviderDefinitions() {
       settingsSections: []
     },
     {
-      id: "openrouter",
-      label: "OpenRouter",
-      settingsSections: ["openrouter"]
+      id: "direct",
+      label: "Direct provider",
+      settingsSections: []
     }
   ];
 }

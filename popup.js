@@ -2,7 +2,7 @@ const DEFAULT_CONFIG = {
   provider: "complementary",
   enabled: false,
   analysisSensitivity: "standard",
-  setupMode: "advanced",
+  setupMode: "basic",
   onboardingComplete: false,
   managedEmail: "",
   managedAccessKey: "",
@@ -15,28 +15,23 @@ const DEFAULT_CONFIG = {
   managedFeedbackParticipantId: "",
   managedProviderProjectId: "",
   managedModelPolicy: null,
-  openrouterApiKey: "",
-  openrouterModel: ""
+  directModel: ""
 };
-const STATIC_OPENROUTER_MODEL_POLICY = {
-  catalog_version: "2026-03-31",
-  latest_sonnet_model_id: "anthropic/claude-sonnet-4.6",
+const STATIC_DIRECT_MODEL_POLICY = {
+  catalog_version: "2026-05-08-direct",
+  relay_provider: "direct",
+  latest_sonnet_model_id: "claude-sonnet-4-6",
   default_models_by_surface: {
-    "claude.ai": "openai/gpt-5-mini",
-    "chatgpt.com": "anthropic/claude-sonnet-4.6",
-    "chat.openai.com": "anthropic/claude-sonnet-4.6"
+    "claude.ai": "gpt-5-mini",
+    "chatgpt.com": "claude-sonnet-4-6",
+    "chat.openai.com": "claude-sonnet-4-6"
   },
   curated_models: [
-    { id: "openai/gpt-5-mini", label: "OpenAI: GPT-5 Mini" },
-    { id: "anthropic/claude-sonnet-4.6", label: "Anthropic: Claude Sonnet 4.6" },
-    { id: "google/gemini-2.5-flash", label: "Google: Gemini 2.5 Flash" },
-    { id: "google/gemini-2.5-pro", label: "Google: Gemini 2.5 Pro" },
-    { id: "meta-llama/llama-4-maverick", label: "Meta: Llama 4 Maverick" },
-    { id: "mistralai/mistral-medium-3.1", label: "Mistral: Medium 3.1" },
-    { id: "qwen/qwen3-coder", label: "Qwen: Qwen3 Coder" },
-    { id: "qwen/qwen3-235b-a22b", label: "Qwen: Qwen3 235B A22B" }
+    { id: "gpt-5-mini", label: "OpenAI: GPT-5 Mini" },
+    { id: "claude-sonnet-4-6", label: "Anthropic: Claude Sonnet 4.6" }
   ]
 };
+const DIRECT_MODEL_IDS = new Set(STATIC_DIRECT_MODEL_POLICY.curated_models.map((entry) => entry.id));
 
 const AUTO_SAVE_DELAY_MS = 250;
 
@@ -69,8 +64,7 @@ const analysisDisclosureNode = document.getElementById("analysis-disclosure");
 const openAdvancedSettingsButton = document.getElementById("open-advanced-settings");
 const closeAdvancedSettingsButton = document.getElementById("close-advanced-settings");
 const advancedTestConnectionButton = document.getElementById("advanced-test-connection");
-const openrouterKeyNode = document.getElementById("openrouter-key");
-const openrouterModelNode = document.getElementById("openrouter-model");
+const directModelNode = document.getElementById("direct-model");
 const analysisSensitivityNode = document.getElementById("analysis-sensitivity");
 const analysisSensitivityValueNode = document.getElementById("analysis-sensitivity-value");
 const analysisSensitivityDescriptionNode = document.getElementById("analysis-sensitivity-description");
@@ -79,7 +73,7 @@ const advancedConnectionStatusNode = document.getElementById("advanced-connectio
 const advancedAnalysisDisclosureNode = document.getElementById("advanced-analysis-disclosure");
 const dataUseDescriptionNode = document.getElementById("data-use-description");
 const STATIC_DATA_USE_DESCRIPTION =
-  "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenRouter for analysis. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it. If you are in a pilot study, a pseudonymous ID may also be attached to your feedback.";
+  "When Safety Nudges is on, it sends the current exchange plus a bounded window of recent conversation history through Safety Nudges managed infrastructure to OpenAI or Anthropic for analysis. Feedback is optional, and chat history only reaches the Safety Nudges database if you explicitly submit feedback and opt in to share it. If you are in a pilot study, a pseudonymous ID may also be attached to your feedback.";
 
 const state = {
   config: { ...DEFAULT_CONFIG },
@@ -116,21 +110,23 @@ function normalizeLoadedConfig(config) {
     ...(config || {})
   };
 
-  if (merged.provider !== "openrouter" && merged.provider !== "complementary") {
+  if (merged.provider !== "direct" && merged.provider !== "complementary") {
     merged.provider = DEFAULT_CONFIG.provider;
   }
 
-  if (!merged.onboardingComplete) {
-    const hasLegacySetup = Boolean(merged.openrouterApiKey);
-    if (hasLegacySetup) {
-      merged.onboardingComplete = true;
-      merged.setupMode = merged.setupMode || "advanced";
-    }
-  }
-
+  merged.managedModelPolicy = sanitizeDirectModelPolicy(merged.managedModelPolicy);
   merged.analysisSensitivity = normalizeAnalysisSensitivityValue(merged.analysisSensitivity);
 
   return merged;
+}
+
+function sanitizeDirectModelPolicy(policy) {
+  if (!policy || typeof policy !== "object" || policy.relay_provider !== "direct") {
+    return STATIC_DIRECT_MODEL_POLICY;
+  }
+  const curatedModels = Array.isArray(policy.curated_models) ? policy.curated_models : [];
+  const hasOnlyDirectModels = curatedModels.every((entry) => entry && DIRECT_MODEL_IDS.has(entry.id));
+  return hasOnlyDirectModels ? policy : STATIC_DIRECT_MODEL_POLICY;
 }
 
 function normalizeAnalysisSensitivityValue(value) {
@@ -148,10 +144,10 @@ function getAnalysisSensitivityOption(value) {
   return ANALYSIS_SENSITIVITY_OPTIONS[getAnalysisSensitivityIndex(value)];
 }
 
-function getOpenRouterModelPolicy(config) {
+function getDirectModelPolicy(config) {
   return config && config.managedModelPolicy && typeof config.managedModelPolicy === "object"
     ? config.managedModelPolicy
-    : STATIC_OPENROUTER_MODEL_POLICY;
+    : STATIC_DIRECT_MODEL_POLICY;
 }
 
 function getDefaultModelForSurface(policy, hostname, fallback = "") {
@@ -160,26 +156,26 @@ function getDefaultModelForSurface(policy, hostname, fallback = "") {
 }
 
 function buildComplementaryProviderDescription(config) {
-  const policy = getOpenRouterModelPolicy(config);
-  const claudeModel = getDefaultModelForSurface(policy, "claude.ai", "openai/gpt-5-mini");
+  const policy = getDirectModelPolicy(config);
+  const claudeModel = getDefaultModelForSurface(policy, "claude.ai", "gpt-5-mini");
   const chatgptModel =
     getDefaultModelForSurface(
       policy,
       "chatgpt.com",
-      getDefaultModelForSurface(policy, "chat.openai.com", "anthropic/claude-sonnet-4.6")
+      getDefaultModelForSurface(policy, "chat.openai.com", "claude-sonnet-4-6")
     );
   return `Use ${claudeModel} on claude.ai and ${chatgptModel} on chatgpt.com.`;
 }
 
-function refreshOpenRouterModelOptions(selectedValue) {
-  if (!openrouterModelNode) {
+function refreshDirectModelOptions(selectedValue) {
+  if (!directModelNode) {
     return;
   }
 
-  const policy = getOpenRouterModelPolicy(state.config);
+  const policy = getDirectModelPolicy(state.config);
   const curatedModels = Array.isArray(policy.curated_models) ? policy.curated_models : [];
-  const nextValue = selectedValue || state.config.openrouterModel || DEFAULT_CONFIG.openrouterModel;
-  openrouterModelNode.innerHTML = "";
+  const nextValue = selectedValue || state.config.directModel || DEFAULT_CONFIG.directModel;
+  directModelNode.innerHTML = "";
 
   const placeholder = document.createElement("option");
   placeholder.value = "";
@@ -187,7 +183,7 @@ function refreshOpenRouterModelOptions(selectedValue) {
   placeholder.disabled = true;
   placeholder.hidden = true;
   placeholder.selected = !nextValue;
-  openrouterModelNode.appendChild(placeholder);
+  directModelNode.appendChild(placeholder);
 
   curatedModels.forEach((entry) => {
     if (!entry || typeof entry !== "object" || !entry.id) {
@@ -197,7 +193,7 @@ function refreshOpenRouterModelOptions(selectedValue) {
     option.value = entry.id;
     option.textContent = entry.label || entry.id;
     option.selected = entry.id === nextValue;
-    openrouterModelNode.appendChild(option);
+    directModelNode.appendChild(option);
   });
 }
 
@@ -290,9 +286,15 @@ function buildConfigPatch() {
     managedEmail: managedEmailNode ? managedEmailNode.value.trim().toLowerCase() : state.config.managedEmail,
     managedAccessKey: managedKeyNode ? managedKeyNode.value.trim() : state.config.managedAccessKey,
     managedModelPolicy: state.config.managedModelPolicy,
-    openrouterApiKey: openrouterKeyNode ? openrouterKeyNode.value.trim() : state.config.openrouterApiKey,
-    openrouterModel: openrouterModelNode ? openrouterModelNode.value.trim() : state.config.openrouterModel
+    directModel: directModelNode ? directModelNode.value.trim() : state.config.directModel
   };
+}
+
+function setSelectedProvider(provider) {
+  state.config.provider = provider;
+  for (const node of providerRadioNodes) {
+    node.checked = node.value === provider;
+  }
 }
 
 function syncFieldIntoState(node) {
@@ -336,13 +338,11 @@ function syncFieldIntoState(node) {
     return;
   }
 
-  if (node === openrouterKeyNode) {
-    state.config.openrouterApiKey = openrouterKeyNode.value.trim();
-    return;
-  }
-
-  if (node === openrouterModelNode) {
-    state.config.openrouterModel = openrouterModelNode.value.trim();
+  if (node === directModelNode) {
+    state.config.directModel = directModelNode.value.trim();
+    if (state.config.directModel) {
+      setSelectedProvider("direct");
+    }
     return;
   }
 
@@ -353,7 +353,7 @@ function syncFieldIntoState(node) {
   }
 
   if (providerRadioNodes.includes(node) && node.checked) {
-    state.config.provider = node.value;
+    setSelectedProvider(node.value);
   }
 }
 
@@ -375,12 +375,9 @@ function applyStateToInputs() {
     node.checked = node.value === state.config.provider;
   }
 
-  if (openrouterKeyNode) {
-    openrouterKeyNode.value = state.config.openrouterApiKey || "";
-  }
-  refreshOpenRouterModelOptions(state.config.openrouterModel || DEFAULT_CONFIG.openrouterModel);
-  if (openrouterModelNode) {
-    openrouterModelNode.value = state.config.openrouterModel || DEFAULT_CONFIG.openrouterModel;
+  refreshDirectModelOptions(state.config.directModel || DEFAULT_CONFIG.directModel);
+  if (directModelNode) {
+    directModelNode.value = state.config.directModel || DEFAULT_CONFIG.directModel;
   }
   if (analysisSensitivityNode) {
     analysisSensitivityNode.value = String(getAnalysisSensitivityIndex(state.config.analysisSensitivity));
@@ -511,6 +508,24 @@ function scheduleAutoSave() {
         state.isSaving = false;
       });
   }, AUTO_SAVE_DELAY_MS);
+}
+
+function saveCurrentSettingsNow() {
+  if (!state.loaded) {
+    return;
+  }
+
+  if (state.saveTimer) {
+    window.clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+  }
+
+  state.isSaving = true;
+  void saveConfig(buildConfigPatch())
+    .catch((_error) => {})
+    .finally(() => {
+      state.isSaving = false;
+    });
 }
 
 async function flushPendingSave() {
@@ -700,24 +715,12 @@ async function runAdvancedConnectionTest() {
       }
     });
   }
-  if ((state.config.openrouterApiKey || "").trim()) {
-    checks.push({
-      label: "OpenRouter",
-      config: {
-        ...state.config,
-        setupMode: "advanced",
-        provider: "openrouter",
-        onboardingComplete: true
-      }
-    });
-  }
-
   if (checks.length === 0) {
     clearPendingActivity();
     stopFastActivityPolling();
     state.isTestingConnection = false;
     render();
-    setAdvancedConnectionStatus("❌ No managed session, activation email + code, or OpenRouter key is available to test.", "error");
+    setAdvancedConnectionStatus("❌ No managed session or activation email + code is available to test.", "error");
     return;
   }
 
@@ -838,14 +841,18 @@ async function completeBasicSetup() {
   refreshRuntimeStatus();
 }
 
-function attachFieldAutoSave(node, eventName = "input") {
+function attachFieldAutoSave(node, eventName = "input", options = {}) {
   if (!node) {
     return;
   }
 
   node.addEventListener(eventName, () => {
     syncFieldIntoState(node);
-    scheduleAutoSave();
+    if (options.immediate) {
+      saveCurrentSettingsNow();
+    } else {
+      scheduleAutoSave();
+    }
   });
 }
 
@@ -866,13 +873,12 @@ void loadConfigFromBackground()
   });
 
 providerRadioNodes.forEach((node) => {
-  attachFieldAutoSave(node, "change");
+  attachFieldAutoSave(node, "change", { immediate: true });
 });
 
-attachFieldAutoSave(openrouterKeyNode);
-attachFieldAutoSave(openrouterModelNode, "change");
+attachFieldAutoSave(directModelNode, "change", { immediate: true });
 attachFieldAutoSave(analysisSensitivityNode, "input");
-attachFieldAutoSave(analysisSensitivityNode, "change");
+attachFieldAutoSave(analysisSensitivityNode, "change", { immediate: true });
 attachFieldAutoSave(managedEmailNode);
 attachFieldAutoSave(managedEmailAdvancedNode);
 attachFieldAutoSave(managedKeyNode);

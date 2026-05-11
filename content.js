@@ -2,8 +2,8 @@ const ROOT_ID = "safety-nudges-root";
 const QUIET_PERIOD_MS = 1500;
 const COMPLETION_POLL_MS = 1000;
 const ANALYSIS_RESPONSE_TIMEOUT_MS = 30000;
-const ANALYSIS_ATTEMPT_TIMEOUT_MS = 4000;
-const MAX_ANALYSIS_ATTEMPTS = 8;
+const ANALYSIS_ATTEMPT_TIMEOUT_MS = ANALYSIS_RESPONSE_TIMEOUT_MS;
+const MAX_ANALYSIS_ATTEMPTS = 1;
 const STALE_ANALYSIS_RETRY_MS = 5000;
 const ANALYSIS_REQUEST_SCHEMA_VERSION = "1.1.0";
 const ANALYSIS_HISTORY_MAX_MESSAGES = 12;
@@ -31,14 +31,20 @@ const state = {
   outsideClickInstalled: false,
   viewportListenersInstalled: false,
   extensionRecoveryAttempted: false,
-  analysisEnabled: true
+  analysisEnabled: false
 };
 
 function createChatGptSurfaceAdapter() {
   return {
     id: "chatgpt",
     matches() {
-      return window.location.hostname === "chatgpt.com" || window.location.hostname === "chat.openai.com";
+      const fixtureSurface = document.querySelector('meta[name="safety-nudges-surface"]')?.getAttribute("content");
+      const isFixture = document.querySelector('meta[name="safety-nudges-fixture"]');
+      return (
+        window.location.hostname === "chatgpt.com" ||
+        window.location.hostname === "chat.openai.com" ||
+        (Boolean(isFixture) && fixtureSurface !== "claude")
+      );
     },
     getConversationContainer() {
       return document.querySelector("main");
@@ -61,6 +67,12 @@ function createChatGptSurfaceAdapter() {
       return getGenericNodeText(node);
     },
     getConversationId() {
+      const fixtureConversationId = document
+        .querySelector('meta[name="safety-nudges-conversation-id"]')
+        ?.getAttribute("content");
+      if (fixtureConversationId && fixtureConversationId.trim()) {
+        return fixtureConversationId.trim();
+      }
       const pathParts = window.location.pathname.split("/").filter(Boolean);
       if (pathParts.length > 0) {
         return pathParts.at(-1) || null;
@@ -93,7 +105,8 @@ function createClaudeSurfaceAdapter() {
   return {
     id: "claude",
     matches() {
-      return window.location.hostname === "claude.ai";
+      const fixtureSurface = document.querySelector('meta[name="safety-nudges-surface"]')?.getAttribute("content");
+      return window.location.hostname === "claude.ai" || fixtureSurface === "claude";
     },
     getConversationContainer() {
       const inputContainer = document.querySelector('[data-chat-input-container="true"]');
@@ -131,6 +144,12 @@ function createClaudeSurfaceAdapter() {
       return getGenericNodeText(node);
     },
     getConversationId() {
+      const fixtureConversationId = document
+        .querySelector('meta[name="safety-nudges-conversation-id"]')
+        ?.getAttribute("content");
+      if (fixtureConversationId && fixtureConversationId.trim()) {
+        return fixtureConversationId.trim();
+      }
       const pathParts = window.location.pathname.split("/").filter(Boolean);
       const lastPathPart = pathParts.length > 0 ? pathParts.at(-1) || null : null;
       if (lastPathPart && lastPathPart !== "new") {
@@ -225,6 +244,15 @@ function buildCompletionMessage(result) {
   }
 
   return `${issueCount} issue${issueCount === 1 ? "" : "s"} detected.`;
+}
+
+function capitalizeDisplayText(value, fallback = "") {
+  const text = typeof value === "string" && value.trim() ? value.trim() : fallback;
+  if (!text) {
+    return "";
+  }
+
+  return text.charAt(0).toLocaleUpperCase() + text.slice(1);
 }
 
 function getConversationContainer() {
@@ -395,7 +423,15 @@ function applyStoredAnalysisConfig(config) {
     return;
   }
 
+  const wasEnabled = state.analysisEnabled;
   state.analysisEnabled = Boolean(config.enabled);
+  if (!state.analysisEnabled) {
+    clearAnalysisUi();
+    return;
+  }
+  if (!wasEnabled) {
+    scheduleAnalysis("config-enabled");
+  }
 }
 
 function loadStoredAnalysisConfig() {
@@ -410,8 +446,20 @@ function loadStoredAnalysisConfig() {
       applyStoredAnalysisConfig(response.config || null);
     })
     .catch((_error) => {
-      // Ignore background messaging failures and keep the default enabled state.
+      state.analysisEnabled = false;
     });
+}
+
+function clearAnalysisUi() {
+  if (state.analyzeTimer) {
+    window.clearTimeout(state.analyzeTimer);
+    state.analyzeTimer = null;
+  }
+  closeAllResponsePanels();
+  document.querySelectorAll(".safety-nudges-response-anchor").forEach((node) => node.remove());
+  document.querySelectorAll(".safety-nudges-inline-highlight").forEach((node) => unwrapNode(node));
+  state.analysesByFingerprint.clear();
+  state.payloadByFingerprint.clear();
 }
 
 function nowMs() {
@@ -639,6 +687,16 @@ function isRecoverableExtensionError(message) {
   );
 }
 
+function hasRuntimeMessaging() {
+  return Boolean(
+    typeof chrome !== "undefined" &&
+      chrome.runtime &&
+      typeof chrome.runtime.sendMessage === "function" &&
+      chrome.runtime.onMessage &&
+      typeof chrome.runtime.onMessage.addListener === "function"
+  );
+}
+
 function attemptExtensionContextRecovery(reason) {
   if (state.extensionRecoveryAttempted) {
     return false;
@@ -653,6 +711,11 @@ function attemptExtensionContextRecovery(reason) {
 
 function emitClientLog(message, details = null, level = "info") {
   return new Promise((resolve) => {
+    if (!hasRuntimeMessaging()) {
+      resolve(false);
+      return;
+    }
+
     try {
       chrome.runtime.sendMessage(
         {
@@ -681,6 +744,11 @@ function emitClientLog(message, details = null, level = "info") {
 
 function sendRuntimeMessage(message) {
   return new Promise((resolve, reject) => {
+    if (!hasRuntimeMessaging()) {
+      reject(new Error("Extension runtime messaging is unavailable."));
+      return;
+    }
+
     try {
       chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
@@ -784,6 +852,16 @@ async function submitJudgmentFeedback(payload, fingerprint, analysisState, feedb
 
 function sendAnalysisMessageOnce(payload, timeoutMs) {
   return new Promise((resolve) => {
+    if (!hasRuntimeMessaging()) {
+      resolve({
+        ok: false,
+        error: "Extension messaging is unavailable.",
+        shouldRetry: false,
+        suppressUi: true
+      });
+      return;
+    }
+
     const serializedPayload = buildSerializablePayload(payload);
     emitClientLog("Content script dispatching analysis message", {
       conversationId: serializedPayload.conversationId || null,
@@ -968,11 +1046,20 @@ function getResponsePanel(anchor) {
   }
 
   const fingerprint = anchor.dataset.fingerprint;
+  const anchoredPanel = anchor.querySelector(".safety-nudges-response-panel");
   if (!fingerprint) {
-    return anchor.querySelector(".safety-nudges-response-panel");
+    return anchoredPanel;
   }
 
-  return document.querySelector(`.safety-nudges-response-panel[data-owner-fingerprint="${fingerprint}"]`);
+  if (anchoredPanel && anchoredPanel.dataset.ownerFingerprint === fingerprint) {
+    return anchoredPanel;
+  }
+
+  return (
+    Array.from(document.querySelectorAll(".safety-nudges-response-panel")).find(
+      (panel) => panel.dataset.ownerFingerprint === fingerprint
+    ) || null
+  );
 }
 
 function mountResponsePanelToOverlay(anchor) {
@@ -1358,7 +1445,9 @@ function updateInlineTooltipPlacement(highlightNode) {
     return;
   }
 
-  const matchingHighlights = Array.from(document.querySelectorAll(`.safety-nudges-inline-highlight[data-tooltip-id="${tooltipId}"]`));
+  const matchingHighlights = Array.from(document.querySelectorAll(".safety-nudges-inline-highlight")).filter(
+    (node) => node.dataset.tooltipId === tooltipId
+  );
   if (matchingHighlights.length === 0) {
     return;
   }
@@ -1472,9 +1561,9 @@ function ensureResponseAnchor(responseNode, fingerprint) {
     anchor.innerHTML = [
       '<button type="button" class="safety-nudges-response-chip" aria-expanded="false">',
       '<span class="safety-nudges-spinner" aria-hidden="true"></span>',
-      '<span class="safety-nudges-chip-text">Safety Nudges</span>',
+      '<span class="safety-nudges-chip-text">Checking response...</span>',
       "</button>",
-      `<div class="safety-nudges-response-panel" data-owner-fingerprint="${fingerprint}" hidden>`,
+      '<div class="safety-nudges-response-panel" hidden>',
       '<div class="safety-nudges-panel-header">',
       '<p class="safety-nudges-panel-title">Safety Nudges</p>',
       '<button type="button" class="safety-nudges-panel-close" aria-label="Close response issue details">&times;</button>',
@@ -1499,6 +1588,11 @@ function ensureResponseAnchor(responseNode, fingerprint) {
       "</div>",
       "</div>"
     ].join("");
+
+    const panel = anchor.querySelector(".safety-nudges-response-panel");
+    if (panel) {
+      panel.dataset.ownerFingerprint = fingerprint;
+    }
 
     const chip = anchor.querySelector(".safety-nudges-response-chip");
     if (chip) {
@@ -2308,8 +2402,10 @@ function renderIssueList(listNode, result) {
 
     const rationale = document.createElement("p");
     rationale.className = "safety-nudges-issue-rationale";
-    rationale.textContent =
-      issue && issue.rationale ? issue.rationale : "Potential issue detected in this response.";
+    rationale.textContent = capitalizeDisplayText(
+      issue && issue.rationale ? issue.rationale : "",
+      "Potential issue detected in this response."
+    );
 
     details.append(title, rationale);
 
@@ -2457,7 +2553,7 @@ function renderResponseIndicator(payload, fingerprint, analysisState) {
   }
 
   chipText.textContent = buildCompletionMessage(result);
-  summary.textContent = result.summary || buildCompletionMessage(result);
+  summary.textContent = capitalizeDisplayText(result.summary || "", buildCompletionMessage(result));
   renderIssueList(issueList, result);
   renderFeedbackSection(anchor, getFeedbackState(fingerprint), analysisState);
   maybeLogSpanDisplayMessage(payload, result, highlightDiagnostics);
@@ -2529,6 +2625,15 @@ async function maybeAnalyzeLatestTurn() {
   }
 
   if (!response.ok) {
+    if (response.suppressUi) {
+      state.analysesByFingerprint.delete(fingerprint);
+      const anchor = getResponseAnchorByFingerprint(fingerprint);
+      if (anchor) {
+        anchor.remove();
+      }
+      return;
+    }
+
     const errorMessage = response.error || "Unknown analysis error";
     state.analysesByFingerprint.set(fingerprint, {
       status: "error",
@@ -2713,25 +2818,27 @@ function installShell() {
   installViewportListeners();
   loadStoredAnalysisConfig();
 
-  chrome.runtime.sendMessage(
-    {
-      type: "SAFETY_NUDGES_PING",
-      pageUrl: window.location.href
-    },
-    () => {}
-  );
+  if (hasRuntimeMessaging()) {
+    chrome.runtime.sendMessage(
+      {
+        type: "SAFETY_NUDGES_PING",
+        pageUrl: window.location.href
+      },
+      () => {}
+    );
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!message || message.type !== "SAFETY_NUDGES_API_CONFIG_UPDATED") {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (!message || message.type !== "SAFETY_NUDGES_API_CONFIG_UPDATED") {
+        return false;
+      }
+
+      applyStoredAnalysisConfig(message.config || null);
+      sendResponse({
+        ok: true
+      });
       return false;
-    }
-
-    applyStoredAnalysisConfig(message.config || null);
-    sendResponse({
-      ok: true
     });
-    return false;
-  });
+  }
 
   installMutationObserver();
   installCompletionPoller();

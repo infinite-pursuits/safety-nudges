@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Safety Nudges",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Safety Nudges audits chatbot conversations in real time to screen for common problems.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -16,7 +16,6 @@
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://claude.ai/*",
-    "https://openrouter.ai/*",
     "https://bjokhkmomdogymmmnpdo.supabase.co/*"
   ],
   "background": {
