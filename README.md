@@ -65,7 +65,7 @@ If you use Safety Nudges in your research or projects, please cite:
 ```bibtex
 @software{safety_nudges_2026,
   title = {Safety Nudges},
-  author = {Wedgwood, J. T. and Yadav, Chhavi and Smith, Virginia},
+  author = {Yadav, Chhavi* and Wedgwood, James* and Smith, Virginia},
   year = {2026},
   url = {https://github.com/jtbwedgwood/safety-nudges},
   note = {Chrome extension for highlighting risks in AI chatbot responses in real time}
