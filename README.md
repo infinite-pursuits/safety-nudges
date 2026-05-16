@@ -70,3 +70,11 @@ If you use Safety Nudges in your research or projects, please cite:
   url = {https://github.com/jtbwedgwood/safety-nudges},
   note = {Chrome extension for highlighting risks in AI chatbot responses in real time}
 }
+```
+
+\* Equal contribution.
+
+## Contact
+
+For questions, feedback, or collaborations, please contact:  
+[openreflection1@gmail.com](mailto:openreflection1@gmail.com)
